@@ -1,0 +1,18 @@
+[Unit]
+Description=GNOME AirPods Companion audio-mode policy
+Documentation=https://github.com/dosment/gnome-airpods-companion
+After=graphical-session.target pipewire.service wireplumber.service
+PartOf=graphical-session.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/gnome-airpods-companion watch
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=graphical-session.target

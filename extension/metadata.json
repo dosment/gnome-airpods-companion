@@ -1,0 +1,8 @@
+{
+  "uuid": "gnome-airpods-companion@dosment.github.io",
+  "name": "AirPods Companion",
+  "description": "Native AirPods connection, Music/Meeting profiles, battery, listening controls and independent Voxtype microphone routing.",
+  "shell-version": ["50"],
+  "url": "https://github.com/dosment/gnome-airpods-companion",
+  "version": 1
+}

@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+.cache/
+build/
+dist/
+node_modules/
+*.log
+.env
+.env.*
+*.core
+status.json
+config.local.*

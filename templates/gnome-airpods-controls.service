@@ -1,0 +1,38 @@
+[Unit]
+Description=GNOME AirPods Companion Apple controls (patched LibrePods)
+After=graphical-session.target
+PartOf=graphical-session.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+Environment=QT_LOGGING_RULES=openpods.debug=false
+ExecStart=%h/.local/share/gnome-airpods-companion/libexec/librepods --headless
+Restart=on-failure
+RestartSec=10
+UMask=0077
+StateDirectory=librepods
+StateDirectoryMode=0700
+ConfigurationDirectory=AirPodsTrayApp
+ConfigurationDirectoryMode=0700
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%t
+PrivateTmp=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_BLUETOOTH AF_NETLINK
+
+[Install]
+WantedBy=graphical-session.target

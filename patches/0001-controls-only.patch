@@ -1,0 +1,176 @@
+GNOME AirPods Companion controls-only modification, 2026-09-09.
+License: GPL-3.0 (same terms as the modified daemon; preserve daemon/LICENSE).
+Base: thisisgm/omarchy-pods fff7fec600a5b9a61cdb40e93eccbcceb4b8f824.
+Disable automatic profile/off/restart policy; retain Apple controls and ear playback.
+
+diff --git a/daemon/media/mediacontroller.cpp b/daemon/media/mediacontroller.cpp
+index 481d64e..af6b22b 100644
+--- a/daemon/media/mediacontroller.cpp
++++ b/daemon/media/mediacontroller.cpp
+@@ -227,83 +227,18 @@ QString MediaController::getPreferredA2dpProfile() {
+ }
+ 
+ bool MediaController::restartWirePlumber() {
+-  LOG_INFO("Restarting WirePlumber to rediscover A2DP profiles");
+-  int result = QProcess::execute("systemctl", QStringList() << "--user" << "restart" << "wireplumber");
+-  if (result == 0) {
+-    LOG_INFO("WirePlumber restarted successfully");
+-    QThread::sleep(2);
+-    return true;
+-  } else {
+-    LOG_ERROR("Failed to restart WirePlumber. Do you use wireplumber?");
+-    return false;
+-  }
++  // GNOME companion owns profiles; never restart audio, select A2DP or turn a card off.
++  return false;
+ }
+ 
+ bool MediaController::activateA2dpProfile() {
+-  if (connectedDeviceMacAddress.isEmpty() || m_deviceOutputName.isEmpty()) {
+-    // Usual right after connect, PipeWire has not published the bluez5 card yet, and callers retry.
+-    LOG_WARN("Connected device MAC address or output name is empty, cannot activate A2DP profile");
+-    return false;
+-  }
+-
+-  if (!isA2dpProfileAvailable()) {
+-    // A restart blocks this thread for about 2s, so a chain gets one however many attempts it takes.
+-    if (m_wirePlumberRestartedThisChain) {
+-      LOG_WARN("A2DP profile still not available, WirePlumber was already restarted for this chain");
+-      return false;
+-    }
+-    LOG_WARN("A2DP profile not available, attempting to restart WirePlumber");
+-    m_wirePlumberRestartedThisChain = true;
+-    if (restartWirePlumber()) {
+-      m_deviceOutputName = getAudioDeviceName();
+-      if (!isA2dpProfileAvailable()) {
+-        LOG_ERROR("A2DP profile still not available after WirePlumber restart");
+-        return false;
+-      }
+-    } else {
+-      LOG_ERROR("Could not restart WirePlumber, A2DP profile unavailable");
+-      return false;
+-    }
+-  }
+-
+-  QString preferredProfile = getPreferredA2dpProfile();
+-  if (preferredProfile.isEmpty()) {
+-    LOG_ERROR("No suitable A2DP profile found");
+-    return false;
+-  }
+-
+-  // Re-applying the profile already in place tears the live sink down under a playing stream.
+-  const QString activeProfile = m_pulseAudio->getActiveCardProfile(m_deviceOutputName);
+-  if (activeProfile == preferredProfile) {
+-    LOG_INFO("Best profile already active: " << activeProfile);
+-  } else {
+-    LOG_INFO("Activating best output profile: " << preferredProfile);
+-    if (!m_pulseAudio->setCardProfile(m_deviceOutputName, preferredProfile)) {
+-      LOG_ERROR("Failed to activate profile: " << preferredProfile);
+-      return false;
+-    }
+-    LOG_INFO("Profile activated: " << preferredProfile);
+-  }
+-
+-  // AirPods stem swipes write 1/15 steps over AVRCP, so snap them onto the 5% grid.
+-  QString sink = m_pulseAudio->getDefaultSink();
+-  if (!sink.isEmpty() && sink.contains(connectedDeviceMacAddress)) {
+-    m_pulseAudio->enableVolumeSnap(sink, 5);
+-  }
+-
+-  return true;
++  // GNOME companion owns profiles; never restart audio, select A2DP or turn a card off.
++  return false;
+ }
+ 
+ void MediaController::activateA2dpProfileWithRetry(const QString &macAddress) {
+-  if (macAddress.isEmpty()) {
+-    LOG_WARN("No MAC address for the connected device, cannot start A2DP profile activation");
+-    return;
+-  }
+-
+-  // A fresh generation supersedes any chain still in flight, so only the newest request acts.
+-  const quint64 generation = ++m_a2dpRetryGeneration;
+-  m_wirePlumberRestartedThisChain = false;
+-  attemptA2dpActivation(macAddress, generation, 0);
++  // GNOME companion owns profiles; never restart audio, select A2DP or turn a card off.
++  setConnectedDeviceMacAddress(macAddress);
+ }
+ 
+ void MediaController::cancelPendingA2dpActivation() {
+@@ -311,47 +246,7 @@ void MediaController::cancelPendingA2dpActivation() {
+ }
+ 
+ void MediaController::attemptA2dpActivation(const QString &macAddress, quint64 generation, int attempt, int unanswered) {
+-  static constexpr int kMaxAttempts = 6;
+-  static constexpr int kDelayMs = 1500;
+-  static constexpr int kCaptureRecheckMs = 10000;
+-  static constexpr int kMaxUnansweredChecks = 6;
+-
+-  // A newer request or a disconnect superseded this chain, so it must not restore a stale device.
+-  if (generation != m_a2dpRetryGeneration) return;
+-
+-  // PipeWire publishes the bluez5 card asynchronously, so the first attempts commonly find nothing.
+-  setConnectedDeviceMacAddress(macAddress);
+-
+-  // Switching under a live capture cuts the mic, and no other timer re-arms this ladder.
+-  const CaptureState capture = m_pulseAudio->captureState(connectedDeviceMacAddress);
+-  if (capture != CaptureState::Idle) {
+-    const int nextUnanswered = unansweredChecksAfter(capture, unanswered);
+-    if (nextUnanswered >= kMaxUnansweredChecks) {
+-      LOG_ERROR("Giving up on A2DP profile activation for " << macAddress
+-                << ", the capture query came back unknown " << nextUnanswered << " times running");
+-      return;
+-    }
+-    LOG_INFO("Capture " << (capture == CaptureState::Live ? "live" : "unknown")
+-             << " on the AirPods, re-checking in " << kCaptureRecheckMs << "ms");
+-    QTimer::singleShot(kCaptureRecheckMs, this, [this, macAddress, generation, attempt, nextUnanswered]() {
+-      attemptA2dpActivation(macAddress, generation, attempt, nextUnanswered);
+-    });
+-    return;
+-  }
+-
+-  if (activateA2dpProfile()) {
+-    LOG_INFO("A2DP profile activated (attempt " << (attempt + 1) << ")");
+-    return;
+-  }
+-
+-  if (attempt + 1 >= kMaxAttempts) {
+-    LOG_ERROR("Giving up on A2DP profile activation after " << kMaxAttempts << " attempts");
+-    return;
+-  }
+-
+-  QTimer::singleShot(kDelayMs, this, [this, macAddress, generation, attempt]() {
+-    attemptA2dpActivation(macAddress, generation, attempt + 1);
+-  });
++  // GNOME companion owns profiles; never restart audio, select A2DP or turn a card off.
+ }
+ 
+ QString MediaController::getActiveProfile() {
+@@ -360,26 +255,7 @@ QString MediaController::getActiveProfile() {
+ }
+ 
+ void MediaController::removeAudioOutputDevice() {
+-  // A retry still in flight would resurrect the sink right after this tears it down.
+-  cancelPendingA2dpActivation();
+-
+-  // Disabling the snap needs no device name, so it runs before the guard that can return.
+-  m_pulseAudio->enableVolumeSnap(QString(), 5);
+-
+-  if (connectedDeviceMacAddress.isEmpty() || m_deviceOutputName.isEmpty()) {
+-    LOG_WARN("Connected device MAC address or output name is empty, cannot remove audio output device");
+-    return;
+-  }
+-
+-  // Ear detection fires on every packet, so without this the card is re-released every few seconds.
+-  if (m_pulseAudio->getActiveCardProfile(m_deviceOutputName) == QStringLiteral("off")) {
+-    return;
+-  }
+-
+-  LOG_INFO("Removing AirPods as audio output device");
+-  if (!m_pulseAudio->setCardProfile(m_deviceOutputName, "off")) {
+-    LOG_ERROR("Failed to remove AirPods as audio output device");
+-  }
++  // GNOME companion owns profiles; never restart audio, select A2DP or turn a card off.
+ }
+ 
+ void MediaController::setConnectedDeviceMacAddress(const QString &macAddress) {
