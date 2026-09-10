@@ -41,6 +41,20 @@ def install_project(source, prefix, state):
         install_files(files, state)
 
 
+def install_extension(source, prefix, state):
+    """Upgrade UI files only; never replace backend files or change services."""
+    source, prefix = Path(source).absolute(), Path(prefix).absolute()
+    extension = source / 'extension'
+    names = ('metadata.json', 'extension.js', 'model.js', 'stylesheet.css')
+    for name in names:
+        if not (extension / name).is_file():
+            raise RuntimeError(f'Incomplete extension: {name}')
+    if json.loads((extension / 'metadata.json').read_text()).get('uuid') != UUID:
+        raise RuntimeError('Extension UUID does not match installer')
+    destination = prefix / 'share/gnome-shell/extensions' / UUID
+    install_files([(extension / name, destination / name) for name in names], state)
+
+
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -101,14 +115,17 @@ def uninstall_files(state):
 def main():
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['install', 'uninstall'])
+    parser.add_argument('action', choices=['install', 'install-extension', 'uninstall'])
     parser.add_argument('--prefix', type=Path, default=Path.home() / '.local')
     parser.add_argument('--state', type=Path, default=Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))) / 'gnome-airpods-companion/install')
     args = parser.parse_args()
     if os.geteuid() == 0:
         parser.error('Run as your desktop user, never sudo.')
     try:
-        if args.action == 'install':
+        if args.action == 'install-extension':
+            install_extension(Path(__file__).resolve().parents[1], args.prefix, args.state)
+            print('Extension files installed. Backend, services and audio unchanged. Log out/in to load updated JavaScript.')
+        elif args.action == 'install':
             install_project(Path(__file__).resolve().parents[1], args.prefix, args.state)
             print('Files installed. No services enabled or audio configuration changed.')
         else:

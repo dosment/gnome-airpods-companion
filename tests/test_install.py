@@ -42,6 +42,7 @@ class InstallerTests(unittest.TestCase):
         result = subprocess.run(['python3', str(ROOT / 'scripts/manage-install.py'), '--help'], text=True, capture_output=True, check=True)
         self.assertIn('uninstall', result.stdout)
         self.assertIn('--prefix', result.stdout)
+        self.assertIn('install-extension', result.stdout)
 
     def test_project_install_runs_launcher_and_removes_owned_files(self):
         import subprocess
@@ -65,6 +66,50 @@ class InstallerTests(unittest.TestCase):
             self.assertTrue((prefix / 'share/gnome-shell/extensions/gnome-airpods-companion@dosment.github.io/extension.js').exists())
             m.uninstall_files(state)
             self.assertFalse(launcher.exists())
+
+    def test_extension_only_upgrade_preserves_backend_and_restores_ui(self):
+        m = installer()
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source, prefix, state = base / 'source', base / 'prefix', base / 'state'
+            extension = source / 'extension'
+            extension.mkdir(parents=True)
+            files = {'metadata.json': '{"uuid":"gnome-airpods-companion@dosment.github.io"}',
+                     'extension.js': '// new UI', 'model.js': '// model', 'stylesheet.css': '/* style */'}
+            for name, text in files.items():
+                (extension / name).write_text(text)
+            installed = prefix / 'share/gnome-shell/extensions' / m.UUID
+            installed.mkdir(parents=True)
+            (installed / 'extension.js').write_text('// prior UI')
+            backend = prefix / 'bin/gnome-airpods-companion'
+            backend.parent.mkdir(parents=True)
+            backend.write_text('keep backend')
+            self.assertTrue(hasattr(m, 'install_extension'), 'extension-only installation missing')
+            m.install_extension(source, prefix, state)
+            for name, text in files.items():
+                self.assertEqual((installed / name).read_text(), text)
+            self.assertEqual(backend.read_text(), 'keep backend')
+            m.uninstall_files(state)
+            self.assertEqual((installed / 'extension.js').read_text(), '// prior UI')
+            self.assertFalse((installed / 'stylesheet.css').exists())
+            self.assertEqual(backend.read_text(), 'keep backend')
+
+    def test_extension_cli_round_trip_leaves_backend_untouched(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            prefix, state = base / 'prefix', base / 'state'
+            backend = prefix / 'bin/gnome-airpods-companion'
+            backend.parent.mkdir(parents=True)
+            backend.write_text('existing backend')
+            command = ['python3', str(ROOT / 'scripts/manage-install.py')]
+            subprocess.run(command + ['install-extension', '--prefix', str(prefix), '--state', str(state)], check=True, capture_output=True)
+            ui = prefix / 'share/gnome-shell/extensions' / installer().UUID
+            self.assertTrue((ui / 'stylesheet.css').is_file())
+            self.assertEqual(backend.read_text(), 'existing backend')
+            subprocess.run(command + ['uninstall', '--state', str(state)], check=True, capture_output=True)
+            self.assertFalse((ui / 'extension.js').exists())
+            self.assertEqual(backend.read_text(), 'existing backend')
 
     def test_copy_failure_rolls_back_prior_changes(self):
         from unittest.mock import patch
