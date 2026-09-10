@@ -38,6 +38,17 @@ class AppleInstallTest(unittest.TestCase):
         self.assertIn('--work', result.stdout)
         self.assertIn('uninstall', result.stdout)
 
+    def test_user_service_avoids_unsupported_capability_mutations(self):
+        unit = (ROOT / 'templates/gnome-airpods-controls.service').read_text()
+        for directive in (
+            'CapabilityBoundingSet=',
+            'ProtectKernelModules=',
+            'ProtectKernelLogs=',
+            'ProtectClock=',
+        ):
+            self.assertNotIn(directive, unit)
+        self.assertIn('NoNewPrivileges=yes', unit)
+
     def test_payload_is_scoped_and_patch_verified(self):
         import hashlib
         m = load()

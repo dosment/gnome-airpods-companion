@@ -130,10 +130,13 @@ its cache.
 
 - No sudo, setcap, root check or privileged installer is needed by the inspected
   daemon build. QtBluetooth uses BlueZ and L2CAP; this is designed as a user
-  service. The pinned service explicitly has `NoNewPrivileges=yes` and an empty
-  `CapabilityBoundingSet`. Actual controller/BlueZ/kernel permissions remain
-  a hardware gate; do not “fix” permission errors by running as root or adding
-  broad capabilities.
+  service. The pinned service explicitly has `NoNewPrivileges=yes` and does not
+  request capabilities. `CapabilityBoundingSet=`, `ProtectKernelModules=`,
+  `ProtectKernelLogs=`, and `ProtectClock=` are intentionally omitted because
+  this user manager fails each before `exec` with `218/CAPABILITIES`; the
+  daemon still runs unprivileged. Actual
+  controller/BlueZ/kernel permissions remain a hardware gate; do not “fix”
+  permission errors by running as root or adding broad capabilities.
 - Socket: `$XDG_RUNTIME_DIR/librepods.sock`; missing runtime directory is fatal,
   no `/tmp` fallback. Server requests `UserAccessOption`. Runtime directory
   ownership/mode is trusted rather than validated; use the systemd user

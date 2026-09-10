@@ -5,7 +5,7 @@
 Public repository: https://github.com/dosment/gnome-airpods-companion
 
 - GNOME-native full companion; initial hardware acceptance target AirPods 4 with ANC, Ubuntu GNOME 50.
-- Music and Meeting modes persist across reconnects/logins, changing only by explicit user selection. Discover PipeWire IDs and available codecs dynamically; prefer A2DP SBC-XQ for Music and best enumerated HFP (LC3, mSBC, CVSD) for Meeting.
+- Music and Meeting modes persist across reconnects/logins, changing only by explicit user selection. Each explicit selection and reconnect routes playback to the current AirPods sink. Discover PipeWire IDs and available codecs dynamically; prefer A2DP SBC-XQ for Music and best enumerated HFP (LC3, mSBC, CVSD) for Meeting.
 - Never explicitly change Ubuntu's default microphone when changing audio mode. A source disappearing can cause the audio server itself to choose a fallback; disclose this.
 - Optional Voxtype integration: follow current Ubuntu default microphone by default, with a user-selectable pinned input. Do not confuse ALSA names with PipeWire node names. Do not interrupt an active recording for configuration changes.
 - Connection controls, real current versus desired profile, per-bud/case battery with unavailable/stale indications, supported ANC/transparency/adaptive modes, conversation awareness, one-bud ANC and ear-detection behavior.

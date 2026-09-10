@@ -7,7 +7,7 @@ A GNOME-native AirPods menu with explicit Music/Meeting audio modes, Apple liste
 ## Design
 
 - Keep GNOME, BlueZ, PipeWire, and WirePlumber; do not replace the desktop or Bluetooth stack.
-- Separate desired audio mode from observed profile. Reconnection should retain the user's choice.
+- Separate desired audio mode from observed profile. Reconnection should retain the user's choice and route playback to the current AirPods sink.
 - Do not explicitly change Ubuntu's default microphone when switching Music/Meeting modes. Removing a microphone endpoint can still cause PipeWire to pick a fallback.
 - Voxtype may follow the system default or use an independently pinned input.
 - Reuse version-pinned LibrePods protocol work for battery and supported listening/ear-detection controls; never invent missing telemetry.

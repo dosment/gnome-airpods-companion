@@ -15,10 +15,12 @@ def command(args):
         raise RuntimeError("Command failed: " + args[0]) from exc
 
 class Backend:
-    def __init__(self, state_home=None, run=command):
+    def __init__(self, state_home=None, run=command, sleeper=None):
+        import time
         self.home = Path(state_home or os.environ.get("XDG_STATE_HOME", str(Path.home()/".local/state")))
         self.path = self.home / "gnome-airpods-companion/intent.json"
         self.run = run
+        self.sleep = sleeper or time.sleep
 
     def intent(self):
         if not self.path.exists():
@@ -37,13 +39,7 @@ class Backend:
         graph = json.loads(self.run(["pw-dump"]))
         if not isinstance(graph,list) or any(not isinstance(x,dict) for x in graph):
             raise ValueError("Invalid PipeWire graph")
-        raw = json.loads(self.run(BLUEZ))["data"][0]
-        devices = []
-        for path, interfaces in raw.items():
-            props = interfaces.get("org.bluez.Device1", {})
-            p = {k: v["data"] for k, v in props.items()}
-            if p.get("Paired") and "airpods" in p.get("Name", "").lower():
-                devices.append(dict(p, path=path))
+        devices = self.bluez_devices()
         selected = self.intent().get("device_address")
         matches = [d for d in devices if d.get("Address") == selected] if selected else devices
         if len(matches) > 1:
@@ -51,6 +47,34 @@ class Backend:
         device = matches[0] if matches else None
         card = next((x for x in graph if x.get("type") == "PipeWire:Interface:Device" and device and x.get("info",{}).get("props",{}).get("api.bluez5.address") == device["Address"]), None)
         return graph, device, card
+
+    def bluez_devices(self):
+        devices = []
+        try:
+            raw = json.loads(self.run(BLUEZ))["data"][0]
+            for path, interfaces in raw.items():
+                props = interfaces.get("org.bluez.Device1", {})
+                p = {k: v["data"] for k, v in props.items()}
+                if p.get("Paired") and "airpods" in p.get("Name", "").lower():
+                    devices.append(dict(p, path=path))
+            return devices
+        except (RuntimeError, OSError, ValueError, KeyError, TypeError, IndexError):
+            pass
+        import re
+        paths = self.run(["busctl","--system","tree","org.bluez","--list"]).splitlines()
+        for path in paths:
+            if not re.fullmatch(r"/org/bluez/hci\d+/dev_(?:[0-9A-Fa-f]{2}_){5}[0-9A-Fa-f]{2}", path):
+                continue
+            values = {}
+            try:
+                for prop in ("Address","Name","Alias","Paired","Connected"):
+                    reply = json.loads(self.run(["busctl","--system","--json=short","get-property","org.bluez",path,"org.bluez.Device1",prop]))
+                    values[prop] = reply["data"]
+            except (RuntimeError, OSError, ValueError, KeyError, TypeError):
+                continue
+            if values.get("Paired") is True and isinstance(values.get("Name"),str) and "airpods" in values["Name"].lower():
+                devices.append(dict(values,path=path))
+        return devices
 
     def status(self):
         error = None
@@ -67,7 +91,8 @@ class Backend:
             p = obj.get("info",{}).get("props",{})
             if p.get("media.class") == "Audio/Source" and p.get("node.name"):
                 microphones.append({"name":p["node.name"],"description":p.get("node.description",p["node.name"])})
-        return {"schema_version":1,"connected":bool(device and device.get("Connected")),"device_name":device.get("Alias",device.get("Name")) if device else None,"desired_mode":intent.get("desired_mode"),"active_profile":profiles[0].get("name") if profiles else None,"error":error,"microphones":microphones,"voxtype":self.voxtype_status(intent),"apple":self.apple_status()}
+        active = profiles[0] if profiles else {}
+        return {"schema_version":1,"connected":bool(device and device.get("Connected")),"device_name":device.get("Alias",device.get("Name")) if device else None,"desired_mode":intent.get("desired_mode"),"active_profile":active.get("name"),"active_profile_description":active.get("description"),"error":error,"microphones":microphones,"voxtype":self.voxtype_status(intent),"apple":self.apple_status()}
 
     def save(self, value, path=None):
         path = path or self.path
@@ -94,12 +119,33 @@ class Backend:
         intent.update(desired_mode=mode, device_address=device["Address"], mode_revision=uuid.uuid4().hex)
         self.save(intent)
         target = self.apply(card, mode) if card else None
-        result = self.status()
+        result = {}
+        for attempt in range(9):
+            result = self.status()
+            if not target or result["active_profile"] == target or attempt == 8:
+                break
+            self.sleep(0.5)
         if target and result["active_profile"] != target:
             result["error"] = "Desired profile not yet observed"
+        graph, _, current_card = self.discover()
+        if current_card:
+            self.route_output(graph, current_card)
         return result
 
-    def apply(self, card, mode):
+    def route_output(self, graph, card):
+        sink = self.output_sink(graph, card)
+        if sink:
+            self.run(["wpctl","set-default",str(sink["id"])])
+            return sink["id"]
+        return None
+
+    def output_sink(self, graph, card):
+        return next((obj for obj in graph if obj.get("type") == "PipeWire:Interface:Node"
+                    and obj.get("info",{}).get("props",{}).get("media.class") == "Audio/Sink"
+                    and str(obj.get("info",{}).get("props",{}).get("device.id")) == str(card["id"])
+                    and isinstance(obj.get("id"), int)), None)
+
+    def target_profile(self, card, mode):
         profiles = card["info"].get("params",{}).get("EnumProfile",[])
         prefix = "a2dp-sink" if mode == "music" else "headset-head-unit"
         choices = [p for p in profiles if p.get("name", "").startswith(prefix) and p.get("available") not in ("no", False) and isinstance(p.get("index"), int)]
@@ -107,10 +153,14 @@ class Backend:
             raise ValueError("Requested profile unavailable")
         def rank(p):
             name = p["name"].lower()
+            codec = (name + " " + str(p.get("description", "")).lower())
             if mode == "music":
-                return ("sbc_xq" in name, p.get("priority",0))
-            return (3 if "lc3" in name else 2 if "msbc" in name else 1, p.get("priority",0))
-        target = max(choices, key=rank)
+                return ("sbc_xq" in codec, p.get("priority",0))
+            return (3 if "lc3" in codec else 2 if "msbc" in codec else 1, p.get("priority",0))
+        return max(choices, key=rank)
+
+    def apply(self, card, mode):
+        target = self.target_profile(card, mode)
         active = card["info"].get("params",{}).get("Profile",[])
         if not active or active[0].get("name") != target["name"]:
             self.run(["wpctl","set-profile",str(card["id"]),str(target["index"])])
@@ -175,6 +225,10 @@ class Backend:
             raise ValueError("Watch requires finite interval >= 0.5s unless bounded, and nonnegative bounded iterations")
         generation = None
         attempts = 0
+        settle_observations = 0
+        target_profile = None
+        output_routed = False
+        output_route_attempted = False
         self.watch_error = None
         count = 0
         while iterations is None or count < iterations:
@@ -183,25 +237,60 @@ class Backend:
                 with self.exclusive():
                     intent = self.intent()
                     if intent.get("policy",{}).get("enabled") and intent.get("desired_mode"):
-                        _, device, card = self.discover()
+                        graph, device, card = self.discover()
                         token = (device["Address"], card["info"].get("props",{}).get("object.serial",card["id"]), intent.get("mode_revision",intent["desired_mode"])) if card and device and device.get("Connected") else None
                         if token != generation:
                             generation, attempts = token, 0
+                            settle_observations = 0
+                            target_profile = None
+                            output_routed = False
+                            output_route_attempted = False
                             self.watch_error = None
-                        if token and attempts < 3:
+                        if token:
                             if self.setting()["value"]:
                                 self.watch_error = "Autoswitch changed externally; enforcement paused"
                             else:
                                 active = card["info"].get("params",{}).get("Profile",[])
-                                attempts += 1  # failures consume budget too
-                                target = self.apply(card, intent["desired_mode"])
-                                if active and active[0].get("name") == target:
-                                    attempts -= 1
-                                observed = self.status()
-                                if observed["active_profile"] != target and attempts == 3:
+                                active_profile = active[0].get("name") if active else None
+                                if attempts < 3:
+                                    target_profile = self.target_profile(card, intent["desired_mode"])["name"]
+                                    attempts += 1  # dispatched write failures consume the budget too
+                                    self.apply(card, intent["desired_mode"])
+                                    if active_profile == target_profile:
+                                        attempts -= 1
+                                        current_graph, current_card = graph, card
+                                    else:
+                                        current_graph, _, current_card = self.discover()
+                                    current_active = current_card["info"].get("params",{}).get("Profile",[]) if current_card else []
+                                    observed_profile = current_active[0].get("name") if current_active else None
+                                    if observed_profile == target_profile:
+                                        if not output_route_attempted and self.output_sink(current_graph, current_card):
+                                            output_route_attempted = True
+                                            try:
+                                                output_routed = self.route_output(current_graph, current_card) is not None
+                                            except (ValueError, RuntimeError, OSError, KeyError, TypeError) as exc:
+                                                self.watch_error = str(exc)
+                                        settle_observations = 0
+                                        if output_routed:
+                                            self.watch_error = None
+                                    elif attempts == 3:
+                                        settle_observations = 1
+                                        self.watch_error = None
+                                elif settle_observations < 9:
+                                    settle_observations += 1
+                                    profile_confirmed = active_profile == target_profile
+                                    if profile_confirmed and not output_route_attempted and self.output_sink(graph, card):
+                                        output_route_attempted = True
+                                        try:
+                                            output_routed = self.route_output(graph, card) is not None
+                                        except (ValueError, RuntimeError, OSError, KeyError, TypeError) as exc:
+                                            self.watch_error = str(exc)
+                                    if profile_confirmed and output_routed:
+                                        self.watch_error = None
+                                    elif not profile_confirmed and settle_observations == 9:
+                                        self.watch_error = "Profile enforcement budget exhausted; explicit mode selection or reconnect required"
+                                else:
                                     self.watch_error = "Profile enforcement budget exhausted; explicit mode selection or reconnect required"
-                        elif token and attempts >= 3:
-                            self.watch_error = "Profile enforcement budget exhausted; explicit mode selection or reconnect required"
             except (ValueError, RuntimeError, OSError, KeyError, TypeError) as exc:
                 self.watch_error = str(exc)
             if iterations is None or count < iterations:
@@ -312,12 +401,18 @@ class Backend:
         if not ctl.is_file():
             raise ValueError("Pinned librepods-ctl not installed in companion libexec")
         self.run([str(ctl),verb])
-        raw = json.loads(self.run([str(ctl),"status"]))
-        if not isinstance(raw,dict) or raw.get("schema_version") != 1 or type(raw.get("connected")) is not bool:
-            raise ValueError("Invalid Apple control readback")
         expected = {"noise:off":("noise_mode",0),"noise:anc":("noise_mode",1),"noise:transparency":("noise_mode",2),"noise:adaptive":("noise_mode",3),"ear:one":("ear_detection_behavior",0),"ear:both":("ear_detection_behavior",1),"ear:off":("ear_detection_behavior",2),"ca:on":("conversational_awareness",True),"ca:off":("conversational_awareness",False),"onebud:on":("one_bud_anc_mode",True),"onebud:off":("one_bud_anc_mode",False)}
         key, value = ("adaptive_noise_level",int(adaptive[1])) if adaptive else expected[verb]
-        matches = raw.get(key) == value and type(raw.get(key)) is type(value)
+        raw = {}
+        matches = False
+        for attempt in range(9):
+            raw = json.loads(self.run([str(ctl),"status"]))
+            if not isinstance(raw,dict) or raw.get("schema_version") != 1 or type(raw.get("connected")) is not bool:
+                raise ValueError("Invalid Apple control readback")
+            matches = raw.get(key) == value and type(raw.get(key)) is type(value)
+            if matches or attempt == 8:
+                break
+            self.sleep(0.5)
         scope = "hardware_observation" if verb.startswith("noise:") else "local_policy" if verb.startswith("ear:") else "daemon_preference"
         confirmed = matches if scope != "daemon_preference" else None
         return {"apple":self.normalize_apple(raw),"confirmed":confirmed,"reported_matches":matches,"confirmation_scope":scope,"error":None if matches else "Requested Apple value not yet reported"}
@@ -326,8 +421,7 @@ class Backend:
         import re
         if not re.fullmatch(r"(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", address):
             raise ValueError("Invalid Bluetooth address")
-        raw = json.loads(self.run(BLUEZ))["data"][0]
-        if not any(p.get("Address",{}).get("data") == address and p.get("Paired",{}).get("data") is True and "airpods" in p.get("Name",{}).get("data", "").lower() for interfaces in raw.values() for p in [interfaces.get("org.bluez.Device1",{})]):
+        if not any(device.get("Address") == address for device in self.bluez_devices()):
             raise ValueError("Address is not a known paired AirPods device")
         intent = self.intent()
         intent["device_address"] = address

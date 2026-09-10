@@ -8,11 +8,13 @@ def bluez(connected=False):
     return {"data": [{PATH: {"org.bluez.Device1": {k: {"data": v} for k,v in {"Address": MAC, "Name": "Test AirPods", "Paired": True, "Connected": connected}.items()}}}]}
 def graph(profile="a2dp-sink"):
     return [{"id":91,"type":"PipeWire:Interface:Device","info":{"props":{"device.api":"bluez5","api.bluez5.address":MAC},"params":{"Profile":[{"name":profile}],"EnumProfile":[{"index":1,"name":"a2dp-sink"},{"index":7,"name":"a2dp-sink-sbc_xq"},{"index":9,"name":"headset-head-unit-msbc"},{"index":10,"name":"headset-head-unit-lc3"}]}}}]
+def sink():
+    return {"id":92,"type":"PipeWire:Interface:Node","info":{"props":{"media.class":"Audio/Sink","device.id":91,"node.name":"bluez_output.test"}}}
 class BackendTest(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.calls=[];self.pw=[];self.bz=bluez();self.setting=True;self.saved=None
-        self.app=b.Backend(Path(self.tmp.name),self.run_command)
+        self.app=b.Backend(Path(self.tmp.name),self.run_command,sleeper=lambda _:None)
     def run_command(self,args):
         self.calls.append(args)
         if args[0]=="pw-dump": return json.dumps(self.pw)
@@ -31,6 +33,32 @@ class BackendTest(unittest.TestCase):
         self.assertEqual(list(Path(self.tmp.name).iterdir()),[])
         self.assertEqual([c[0] for c in self.calls],["pw-dump","busctl"])
 
+    def test_bluez_discovery_falls_back_to_individual_device_properties(self):
+        self.pw=[]
+        values={"Address":MAC,"Name":"Test AirPods","Alias":"Test AirPods","Paired":True,"Connected":True}
+        def fallback(args):
+            self.calls.append(args)
+            if args==["pw-dump"]:
+                return "[]"
+            if args==b.BLUEZ:
+                raise RuntimeError("GetManagedObjects JSON unavailable")
+            if args[:4]==["busctl","--system","tree","org.bluez"]:
+                return "/\n/org/bluez/hci0\n"+PATH+"\n"+PATH+"/sep1\n"
+            if "get-property" in args:
+                return json.dumps({"type":"b" if isinstance(values[args[-1]],bool) else "s","data":values[args[-1]]})
+            raise AssertionError(args)
+        self.app.run=fallback
+        status=self.app.status()
+        self.assertTrue(status["connected"])
+        self.assertEqual(status["device_name"],"Test AirPods")
+        self.assertIsNone(status["error"])
+
+    def test_status_exposes_human_readable_active_profile_description(self):
+        self.pw=graph("headset-head-unit");self.bz=bluez(True)
+        self.pw[0]["info"]["params"]["Profile"][0]["description"]="Headset Head Unit (HSP/HFP, codec LC3-24kHz)"
+        status=self.app.status()
+        self.assertEqual(status["active_profile_description"],"Headset Head Unit (HSP/HFP, codec LC3-24kHz)")
+
     def test_mode_persists_disconnected_intent_without_switching(self):
         self.app.mode("meeting")
         self.assertEqual(self.app.intent()["desired_mode"],"meeting")
@@ -44,6 +72,40 @@ class BackendTest(unittest.TestCase):
         self.assertEqual(s["active_profile"],"a2dp-sink")
         self.assertIn("not yet",s["error"])
         self.assertFalse(any("set-default" in c for c in self.calls))
+
+    def test_mode_waits_for_delayed_pipewire_profile_readback(self):
+        self.bz=bluez(True)
+        reads=0
+        def delayed(args):
+            nonlocal reads
+            self.calls.append(args)
+            if args==["pw-dump"]:
+                reads+=1
+                return json.dumps(graph("a2dp-sink-sbc_xq" if reads >= 3 else "a2dp-sink"))
+            if args[0]=="busctl":
+                return json.dumps(self.bz)
+            return ""
+        self.app.run=delayed
+        self.app.sleep=lambda _:None
+        result=self.app.mode("music")
+        self.assertIsNone(result["error"])
+        self.assertEqual(result["active_profile"],"a2dp-sink-sbc_xq")
+        self.assertGreaterEqual(reads,3)
+
+    def test_mode_routes_only_the_live_airpods_output_node(self):
+        self.pw=graph("headset-head-unit-lc3")+[sink()];self.bz=bluez(True)
+        self.app.mode("meeting")
+        self.assertIn(["wpctl","set-default","92"],self.calls)
+        self.assertFalse(any(c[:2]==["wpctl","set-default"] and c[-1] != "92" for c in self.calls))
+
+    def test_meeting_recognizes_lc3_codec_in_profile_description(self):
+        self.pw=graph();self.bz=bluez(True)
+        self.pw[0]["info"]["params"]["EnumProfile"] = [
+            {"index":9,"name":"headset-head-unit-msbc","description":"Headset Head Unit (HSP/HFP, codec mSBC)","priority":5},
+            {"index":10,"name":"headset-head-unit","description":"Headset Head Unit (HSP/HFP, codec LC3-24kHz)","priority":6},
+        ]
+        self.app.mode("meeting")
+        self.assertIn(["wpctl","set-profile","91","10"],self.calls)
 
     def test_connect_targets_disconnected_paired_device_and_verifies(self):
         result=self.app.connection(True)
@@ -64,7 +126,7 @@ class BackendTest(unittest.TestCase):
         self.app.watch(iterations=5, interval=0)
         self.assertFalse(any(c[:2]==["wpctl","set-profile"] for c in self.calls))
         self.app.policy(True);self.calls.clear()
-        self.app.watch(iterations=8, interval=0)
+        self.app.watch(iterations=11, interval=0)
         self.assertEqual(sum(c[:2]==["wpctl","set-profile"] for c in self.calls),3)
         self.assertEqual(self.app.watch_error,"Profile enforcement budget exhausted; explicit mode selection or reconnect required")
 
@@ -111,6 +173,144 @@ class BackendTest(unittest.TestCase):
         self.assertFalse(result["confirmed"])
         self.assertIn([str(self.app.ctl),"noise:anc"],self.calls)
 
+    def test_apple_control_waits_for_delayed_hardware_readback(self):
+        before={"schema_version":1,"connected":True,"supports_noise_control":True,"noise_mode":2}
+        after=dict(before,noise_mode=1)
+        p=Path(self.tmp.name)/"librepods/status.json";p.parent.mkdir();p.write_text(json.dumps(before))
+        self.app.ctl=Path(self.tmp.name)/"librepods-ctl";self.app.ctl.touch()
+        reads=0
+        def delayed(args):
+            nonlocal reads
+            self.calls.append(args)
+            if args==[str(self.app.ctl),"status"]:
+                reads+=1
+                return json.dumps(after if reads >= 3 else before)
+            return ""
+        self.app.run=delayed
+        self.app.sleep=lambda _:None
+        result=self.app.apple("noise:anc")
+        self.assertTrue(result["confirmed"])
+        self.assertEqual(reads,3)
+
+    def test_watch_routes_airpods_output_once_on_reconnect_generation(self):
+        self.pw=graph("headset-head-unit-lc3")+[sink()];self.bz=bluez(True)
+        self.setting=False;self.saved=False
+        self.app.save({"desired_mode":"meeting","device_address":MAC,"mode_revision":"r1","policy":{"enabled":True,"previous":{"value":True,"saved":None}}})
+        self.app.watch(iterations=1,interval=0)
+        self.assertEqual(self.calls.count(["wpctl","set-default","92"]),1)
+
+    def test_watch_bounds_ambiguous_output_route_failure_per_generation(self):
+        self.pw=graph("headset-head-unit-lc3")+[sink()];self.bz=bluez(True)
+        self.setting=False;self.saved=False
+        self.app.save({"desired_mode":"meeting","device_address":MAC,"mode_revision":"r1","policy":{"enabled":True,"previous":{"value":True,"saved":None}}})
+        route_calls=0
+        def reply_lost_after_dispatch(args):
+            nonlocal route_calls
+            self.calls.append(args)
+            if args==["pw-dump"]:
+                return json.dumps(self.pw)
+            if args[0]=="busctl":
+                return json.dumps(self.bz)
+            if args[:2]==["wpctl","settings"]:
+                return "Value: false (Saved: false)"
+            if args[:2]==["wpctl","set-default"]:
+                route_calls+=1
+                if route_calls == 1:
+                    self.app.save({"desired_mode":"meeting","device_address":MAC,"mode_revision":"r2","policy":{"enabled":True,"previous":{"value":True,"saved":None}}})
+                raise RuntimeError("reply lost after dispatch")
+            return ""
+        self.app.run=reply_lost_after_dispatch
+        result=self.app.watch(iterations=5,interval=0)
+        self.assertEqual(route_calls,2)
+        self.assertEqual(result["error"],"reply lost after dispatch")
+
+    def test_watch_routes_replacement_sink_from_confirming_graph(self):
+        self.bz=bluez(True);self.setting=False;self.saved=False
+        before=graph("a2dp-sink")+[sink()]
+        replacement=sink();replacement["id"]=193
+        after=graph("headset-head-unit-lc3")+[replacement]
+        switched=False
+        def replacing(args):
+            nonlocal switched
+            self.calls.append(args)
+            if args==["pw-dump"]:
+                return json.dumps(after if switched else before)
+            if args[0]=="busctl":
+                return json.dumps(self.bz)
+            if args[:2]==["wpctl","settings"]:
+                return "Value: false (Saved: false)"
+            if args[:2]==["wpctl","set-profile"]:
+                switched=True
+            return ""
+        self.app.run=replacing
+        self.app.save({"desired_mode":"meeting","device_address":MAC,"mode_revision":"r1","policy":{"enabled":True,"previous":{"value":True,"saved":None}}})
+        self.app.watch(iterations=1,interval=0)
+        self.assertIn(["wpctl","set-default","193"],self.calls)
+        self.assertNotIn(["wpctl","set-default","92"],self.calls)
+
+    def test_watch_observes_and_routes_after_third_delayed_profile_write(self):
+        self.bz=bluez(True);self.setting=False;self.saved=False
+        before=graph("a2dp-sink")+[sink()]
+        replacement=sink();replacement["id"]=193
+        after=graph("headset-head-unit-lc3")+[replacement]
+        writes=0;delayed_reads=0
+        def delayed_third(args):
+            nonlocal writes, delayed_reads
+            self.calls.append(args)
+            if args==["pw-dump"]:
+                if writes == 3 and delayed_reads == 0:
+                    return json.dumps(after)
+                if writes == 3:
+                    delayed_reads-=1
+                return json.dumps(before)
+            if args[0]=="busctl":
+                return json.dumps(self.bz)
+            if args[:2]==["wpctl","settings"]:
+                return "Value: false (Saved: false)"
+            if args[:2]==["wpctl","set-profile"]:
+                writes+=1
+                if writes == 3:
+                    delayed_reads=1
+            return ""
+        self.app.run=delayed_third
+        self.app.save({"desired_mode":"meeting","device_address":MAC,"mode_revision":"r1","policy":{"enabled":True,"previous":{"value":True,"saved":None}}})
+        result=self.app.watch(iterations=4,interval=0)
+        self.assertEqual(writes,3)
+        self.assertIn(["wpctl","set-default","193"],self.calls)
+        self.assertIsNone(result["error"])
+
+    def test_watch_retains_target_when_third_dispatched_write_raises(self):
+        self.bz=bluez(True);self.setting=False;self.saved=False
+        before=graph("a2dp-sink")+[sink()]
+        replacement=sink();replacement["id"]=193
+        after=graph("headset-head-unit-lc3")+[replacement]
+        writes=0;delayed_reads=0
+        def raised_after_dispatch(args):
+            nonlocal writes, delayed_reads
+            self.calls.append(args)
+            if args==["pw-dump"]:
+                if writes == 3 and delayed_reads == 0:
+                    return json.dumps(after)
+                if writes == 3:
+                    delayed_reads-=1
+                return json.dumps(before)
+            if args[0]=="busctl":
+                return json.dumps(self.bz)
+            if args[:2]==["wpctl","settings"]:
+                return "Value: false (Saved: false)"
+            if args[:2]==["wpctl","set-profile"]:
+                writes+=1
+                if writes == 3:
+                    delayed_reads=1
+                raise RuntimeError("set-profile result unavailable after dispatch")
+            return ""
+        self.app.run=raised_after_dispatch
+        self.app.save({"desired_mode":"meeting","device_address":MAC,"mode_revision":"r1","policy":{"enabled":True,"previous":{"value":True,"saved":None}}})
+        result=self.app.watch(iterations=5,interval=0)
+        self.assertEqual(writes,3)
+        self.assertIn(["wpctl","set-default","193"],self.calls)
+        self.assertIsNone(result["error"])
+
     def test_watch_does_not_spend_retry_budget_when_profile_is_already_correct(self):
         self.pw=graph("headset-head-unit-lc3");self.bz=bluez(True)
         self.app.mode("meeting");self.app.policy(True)
@@ -124,6 +324,27 @@ class BackendTest(unittest.TestCase):
         self.app.run=drifting;self.calls.clear()
         self.app.watch(iterations=12,interval=0)
         self.assertEqual(sum(c[:2]==["wpctl","set-profile"] for c in self.calls),3)
+
+    def test_watch_reports_exhausted_profile_drift_after_output_was_routed(self):
+        self.bz=bluez(True);self.setting=False;self.saved=False
+        reads=0
+        def drifting_after_route(args):
+            nonlocal reads
+            self.calls.append(args)
+            if args==["pw-dump"]:
+                reads+=1
+                current=graph("headset-head-unit-lc3")+[sink()] if reads == 1 else graph("a2dp-sink")+[sink()]
+                return json.dumps(current)
+            if args[0]=="busctl":
+                return json.dumps(self.bz)
+            if args[:2]==["wpctl","settings"]:
+                return "Value: false (Saved: false)"
+            return ""
+        self.app.run=drifting_after_route
+        self.app.save({"desired_mode":"meeting","device_address":MAC,"mode_revision":"r1","policy":{"enabled":True,"previous":{"value":True,"saved":None}}})
+        result=self.app.watch(iterations=12,interval=0)
+        self.assertEqual(sum(c[:2]==["wpctl","set-profile"] for c in self.calls),3)
+        self.assertEqual(result["error"],"Profile enforcement budget exhausted; explicit mode selection or reconnect required")
 
     def test_status_emits_contract_even_when_pipewire_is_unavailable(self):
         self.app.run=lambda args: (_ for _ in ()).throw(RuntimeError("probe unavailable"))
