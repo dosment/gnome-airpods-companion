@@ -1,135 +1,110 @@
-/* Scoped to AirPods Companion menu items; relies on the active GNOME Shell theme. */
-.airpods-title {
-    font-weight: 700;
-    padding-top: 8px;
-    padding-bottom: 0;
+/* Extension-local Omarchy reference treatment. GNOME's PopupMenu/Switch actors remain in use. */
+.airpods-popup {
+    width: 443px;
+    background-color: #151515;
+    border: 1px solid #d8754f;
+    border-radius: 8px;
+    color: #c5c6bd;
+    font-family: "Ubuntu Sans Mono", monospace;
 }
 
-.airpods-connection,
-.airpods-battery-label,
+.airpods-popup .popup-menu-item {
+    padding: 5px 17px;
+    spacing: 8px;
+}
+
+.airpods-header {
+    padding-top: 15px !important;
+    padding-bottom: 13px !important;
+    spacing: 14px !important;
+}
+
+.airpods-header-icon { icon-size: 28px; }
+.airpods-header-copy { spacing: 2px; }
+.airpods-header-title { font-size: 16px; font-weight: 700; }
+.airpods-header-connection,
+.airpods-battery-status,
+.airpods-feature-subtitle,
 .airpods-setting-value,
 .airpods-section-description,
 .airpods-diagnostic-line {
-    opacity: 0.65;
-}
-
-.airpods-connection {
-    padding-top: 0;
-    padding-bottom: 10px;
-}
-
-.airpods-battery-grid {
-    spacing: 8px;
-    padding: 6px 8px 10px;
-}
-
-.airpods-battery-cell {
-    spacing: 2px;
-}
-
-.airpods-battery-icon {
-    icon-size: 20px;
-}
-
-.airpods-battery-icon-unavailable,
-.airpods-battery-value-unavailable {
-    opacity: 0.55;
-}
-
-.airpods-battery-label,
-.airpods-section-description,
-.airpods-diagnostic-line,
-.airpods-setting-value {
+    color: #777970;
     font-size: 0.85em;
 }
 
-.airpods-battery-value {
-    font-weight: 700;
-}
-
 .airpods-section-title {
+    color: #92948a;
+    font-size: 0.85em;
     font-weight: 700;
-    padding-top: 8px;
-    padding-bottom: 3px;
+    padding-top: 10px !important;
+    padding-bottom: 7px !important;
+    text-transform: uppercase;
 }
 
+.airpods-battery-row { spacing: 9px !important; }
+.airpods-battery-name { width: 50px; color: #999b92; }
+.airpods-battery-track {
+    width: 220px;
+    height: 7px;
+    border-radius: 999px;
+    background-color: #3b3c39;
+}
+.airpods-battery-fill {
+    height: 7px;
+    border-radius: 999px;
+    background-color: #c8c9c0;
+}
+.airpods-battery-percent { width: 34px; color: #c5c6bd; }
+.airpods-unavailable { color: #777970; }
+
+.airpods-popup .popup-separator-menu-item { padding: 10px 17px; }
+.airpods-popup .popup-separator-menu-item-separator { background-color: #292b29; }
+
+.airpods-listening-row { padding: 10px 29px !important; color: #96988f; }
+.airpods-listening-selected { color: #c7c8bf; font-weight: 700; }
+.airpods-listening-check { color: #c7c8bf; font-size: 1.1em; }
+
+.airpods-feature-row {
+    padding: 7px 29px 1px !important;
+    color: #c1c2b9;
+}
+.airpods-feature-subtitle {
+    padding: 0 29px 9px !important;
+    max-width: 30em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* Shell 50.1's native PopupSwitchMenuItem contains .toggle-switch. */
+.airpods-popup .toggle-switch {
+    width: 42px;
+    background-color: #252725;
+    border: 1px solid #555750;
+}
+.airpods-popup .toggle-switch .handle {
+    width: 16px;
+    height: 16px;
+    margin: 2px;
+    background-color: #bfc0b8;
+}
+
+.airpods-setting-value,
 .airpods-section-description,
-.airpods-diagnostic-line,
-.airpods-setting-value {
+.airpods-diagnostic-line {
     max-width: 28em;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.airpods-notice {
-    border: 1px solid;
-    border-radius: 6px;
-    font-weight: 700;
-}
-
-.airpods-notice-error {
-    font-weight: 700;
-}
-
-.airpods-segment-group {
-    padding: 0 8px 4px;
-}
-
-.airpods-segments {
-    spacing: 8px;
-}
-
-.airpods-segments .airpods-segment {
-    min-width: 0;
-    min-height: 36px;
-    padding: 7px 12px;
-}
-
-.airpods-noise-tiles {
-    spacing: 6px;
-}
-
-.airpods-noise-tiles .airpods-segment {
-    min-width: 0;
-    min-height: 66px;
-    padding: 7px 5px;
-}
-
-.airpods-segment-content {
-    spacing: 6px;
-}
-
-.airpods-segment-content-tile {
-    spacing: 4px;
-}
-
-.airpods-segment-icon {
-    icon-size: 16px;
-}
-
-.airpods-segment-label {
-    max-width: 11em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.airpods-segment-content-tile .airpods-segment-label {
-    text-align: center;
-    max-width: 9em;
-}
-
-.airpods-segment:checked {
-    font-weight: 700;
-}
-
-/* The installed Shell's .button:checked supplies the selected fill; retain a focus boundary. */
-.airpods-segment:focus {
-    border: 2px solid;
-    box-shadow: 0 0 0 1px;
-}
-
-.airpods-segment-disabled {
-    opacity: 0.48;
-}
+.airpods-notice { border: 1px solid #d8754f; border-radius: 6px; font-weight: 700; }
+.airpods-notice-error { font-weight: 700; }
+.airpods-segment-group { padding: 0 8px 4px; }
+.airpods-segments { spacing: 8px; }
+.airpods-segments .airpods-segment { min-width: 0; min-height: 36px; padding: 7px 12px; }
+.airpods-segment-content { spacing: 6px; }
+.airpods-segment-icon { icon-size: 16px; }
+.airpods-segment-label { max-width: 11em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.airpods-segment:checked { font-weight: 700; }
+.airpods-segment:focus { border: 2px solid; box-shadow: 0 0 0 1px; }
+.airpods-segment-disabled { opacity: 0.48; }

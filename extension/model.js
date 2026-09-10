@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+const EAR_LABELS = {one: 'Pause when one is out', both: 'Pause when both are out', off: 'Never pause'};
+
 export function parseStatus(text) {
     let value;
     try { value = JSON.parse(text); } catch { throw new Error('Invalid companion status JSON'); }
@@ -86,14 +88,17 @@ export function popupPresentation(status, {stale = false, changing = false, erro
     const apple = status?.apple ?? {};
     const cap = apple.capabilities ?? {};
     const state = apple.state ?? {};
-    const noiseNames = {off: 'Off', anc: 'Cancellation', transparency: 'Transparency', adaptive: 'Adaptive'};
-    const noiseIcons = {off: 'audio-volume-muted-symbolic', transparency: 'audio-speakers-symbolic', anc: 'audio-headphones-symbolic', adaptive: 'weather-overcast-symbolic'};
-    const noiseOrder = ['off', 'transparency', 'anc', 'adaptive'];
+    const noiseNames = {off: 'Off', anc: 'Noise Cancellation', transparency: 'Transparency', adaptive: 'Adaptive'};
+    const noiseOrder = ['off', 'transparency', 'adaptive', 'anc'];
     const noiseModes = noiseOrder.filter(mode => Array.isArray(cap.noise_modes) && cap.noise_modes.includes(mode));
     const connected = status?.connected === true;
     const batteryParts = apple.is_headset === true ? [['headset', 'Headphones']] : [['left', 'Left'], ['right', 'Right'], ['case', 'Case']];
-    const battery = connected ? {columns: batteryParts.map(([id, label]) => ({id, label,
-        text: compactBatteryText(apple.battery?.[id], stale || apple.available !== true || apple.stale === true)}))} : null;
+    const battery = connected ? {columns: batteryParts.map(([id, label]) => {
+        const value = apple.battery?.[id];
+        const unavailable = compactBatteryText(value, stale || apple.available !== true || apple.stale === true) === 'Unavailable';
+        return {id, label, text: unavailable ? 'Unavailable' : `${value.level}%`,
+            status: unavailable ? null : value.charging === true ? 'Charging' : value.in_ear === true ? 'In ear' : null};
+    })} : null;
     const desired = status?.desired_mode;
     const observed = observedAudioMode(status?.active_profile);
     const audioMode = connected ? {description: observed === 'music' ? 'High-quality playback' : observed === 'meeting' ? 'Headset microphone · reduced playback quality' : 'Audio mode unavailable',
@@ -101,7 +106,7 @@ export function popupPresentation(status, {stale = false, changing = false, erro
         {id: 'music', label: 'Music', icon: 'audio-x-generic-symbolic', selected: observed === 'music', enabled: enabled('mode', 'music'), argv: ['mode', 'music']},
         {id: 'meeting', label: 'Meeting', icon: 'microphone-sensitivity-high-symbolic', selected: observed === 'meeting', enabled: enabled('mode', 'meeting'), argv: ['mode', 'meeting']},
     ]} : null;
-    const noiseControl = connected && noiseModes.length ? {options: noiseModes.map(id => ({id, label: noiseNames[id], icon: noiseIcons[id],
+    const listeningMode = connected && noiseModes.length ? {options: noiseModes.map(id => ({id, label: noiseNames[id],
         selected: state.noise_mode === id, enabled: enabled('apple', `noise:${id}`), argv: ['apple', `noise:${id}`]}))} : null;
     const vox = status?.voxtype ?? {};
     const pinnedSource = Array.isArray(status?.microphones) ? status.microphones.find(source => source?.name === vox.source) : null;
@@ -110,12 +115,20 @@ export function popupPresentation(status, {stale = false, changing = false, erro
         enabled: status?.connected === true && !stale && !changing, items: [{id: 'default', label: 'Follow Ubuntu default input', selected: vox.mode !== 'pinned', enabled: enabled('voxtype-default'), argv: ['voxtype', 'default']},
             ...(Array.isArray(status?.microphones) ? status.microphones.map(source => ({id: source.name, label: genericSourceLabel(source),
                 selected: vox.mode === 'pinned' && vox.source === source.name, enabled: enabled('voxtype-pin', source.name), argv: ['voxtype', 'pin', source.name]})) : [])]};
+    const features = [];
+    if (cap.conversation_awareness === true && typeof state.conversation_awareness === 'boolean')
+        features.push({id:'conversation-awareness', label:'Conversation Awareness', subtitle:'Lower the volume when you start talking', state:state.conversation_awareness, enabled:enabled('apple', `ca:${state.conversation_awareness ? 'off' : 'on'}`), action:'ca'});
+    if (cap.one_bud_anc === true && typeof state.one_bud_anc === 'boolean')
+        features.push({id:'one-bud-anc', label:'One-Bud ANC', subtitle:'Keep noise cancellation on with one pod in', state:state.one_bud_anc, enabled:enabled('apple', `onebud:${state.one_bud_anc ? 'off' : 'on'}`), action:'onebud'});
+    const earDetection = cap.ear_detection === true && Object.hasOwn(EAR_LABELS, state.ear_detection)
+        ? {label:'Ear detection', value:EAR_LABELS[state.ear_detection], enabled:enabled('apple', `ear:${state.ear_detection}`)} : null;
     const moreItems = [];
-    if (cap.conversation_awareness === true) moreItems.push({id: 'conversation-awareness', label: `Conversation Awareness · ${state.conversation_awareness === true ? 'On' : state.conversation_awareness === false ? 'Off' : 'Unknown'}`, action: 'ca'});
-    if (cap.one_bud_anc === true) moreItems.push({id: 'one-bud-anc', label: `One-Bud ANC · ${state.one_bud_anc === true ? 'On' : state.one_bud_anc === false ? 'Off' : 'Unknown'}`, action: 'onebud'});
-    if (cap.ear_detection === true) moreItems.push({id: 'ear-detection', label: 'Ear detection', action: 'ear'});
-    if (cap.adaptive_level === true) moreItems.push({id: 'adaptive-level', label: `Adaptive noise level${Number.isInteger(state.adaptive_level) ? ` · ${state.adaptive_level}%` : ''}`, action: 'adaptive'});
+    if (connected) moreItems.push({id:'audio-mode', label:'Audio mode', action:'audio-mode'});
+    moreItems.push({id:'dictation', label:'Dictation mic', action:'dictation'});
+    if (cap.adaptive_level === true && state.noise_mode === 'adaptive' && Number.isInteger(state.adaptive_level))
+        moreItems.push({id: 'adaptive-level', label: `Adaptive noise level · ${state.adaptive_level}%`, action: 'adaptive'});
     moreItems.push({id: 'diagnostics', label: 'Diagnostics', action: 'diagnostics'});
+    moreItems.push({id: 'connection', label: connected ? 'Disconnect' : 'Connect', action: connected ? 'disconnect' : 'connect'});
     const diagnostics = [
         changing ? 'Applying… Waiting for status readback' : null,
         error ? `Error: ${safeText(error)}` : null,
@@ -137,11 +150,12 @@ export function popupPresentation(status, {stale = false, changing = false, erro
     ].filter(Boolean);
     const footer = {label: connected ? 'Disconnect' : 'Connect', action: connected ? 'disconnect' : 'connect', enabled: enabled(connected ? 'disconnect' : 'connect')};
     const notice = changing ? 'Applying…' : error ? 'Couldn’t apply change' : null;
+    // The connection action is rendered in More settings; no standalone footer is rendered.
     const sections = connected
-        ? ['header', 'battery', 'audio-mode', 'noise-control', 'dictation', 'more-settings', 'footer']
-        : ['header', 'disconnected-hint', 'dictation', 'more-settings', 'footer'];
+        ? ['header', 'battery', 'listening-mode', 'features', 'ear-detection', 'more-settings']
+        : ['header', 'disconnected-hint', 'dictation', 'more-settings'];
     return {status, notice, header: {title: 'AirPods', connection: stale ? 'Status unavailable · Last reading is stale' : status ? (connected ? 'Connected' : 'Disconnected') : 'Reading companion status…'},
-        disconnectedHint: connected ? null : 'Connect to see battery levels', battery, audioMode, noiseControl, dictation, moreSettings: {items: moreItems}, diagnostics, footer,
+        disconnectedHint: connected ? null : 'Connect to see battery levels', battery, audioMode, listeningMode, noiseControl: null, features, earDetection, dictation, moreSettings: {items: moreItems}, diagnostics, footer,
         sections: sections.map(id => ({id}))};
 }
 

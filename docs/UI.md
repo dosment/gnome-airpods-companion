@@ -21,21 +21,15 @@ It does not render battery, audio-mode, or noise-control sections while disconne
 
 ### Connected
 
-The popup uses a homogeneous GNOME `St.BoxLayout` for three equal Left/Right/Case battery columns (or one headset item), with centered symbolic icon, percentage, and muted label. Missing, invalid, or stale values render as `Unavailable`; zero is shown only when measured and current. Freshness is not inferred from a successful read and is shown only in **Diagnostics**, including stale retained observations and unknown observation age.
+The extension presents the supplied Omarchy-style reference as an extension-local, 443px dark panel with a thin `#d8754f` border and popup-local `Ubuntu Sans Mono` fallback. It uses GNOME Shell 50.1 `PopupMenu`, `PopupMenuItem`, `PopupSwitchMenuItem`, `PopupSubMenuMenuItem`, `St.Bin`, and `St.BoxLayout` actors; it does not use HTML/CSS or change global fonts/theme settings.
 
-**Audio mode** uses a homogeneous native `St.BoxLayout` for equal padded `St.Button` choices; supported **Noise control** uses the same layout for equal capability-gated tiles with an icon above Off, Transparency, Cancellation, and Adaptive. Each `St.Button` is an `St.Bin` with one `St.BoxLayout` child. Buttons carry GNOME Shell's native `button` class, so its `:checked` selected fill and `:focus` treatment remain theme-provided; the extension only adds restrained checked weight and focus boundary. The observed PipeWire profile controls the checked state and a click restores that state until a status readback, preventing optimistic hardware state. A2DP maps to Music; `headset-head-unit`, HFP, and HSP map to Meeting; unknown profiles select neither.
+The main panel contains a generic symbolic headphone icon, **AirPods**, and muted **Connected** state. **BATTERY** is rendered as Left/Right/Case horizontal rows: a 220px `St.Bin` track with a fixed-pixel `St.Widget` fill derived from a current numeric observation, percentage, and only observed `In ear` or `Charging` status. Missing, invalid, or stale data renders `Unavailable`; freshness evidence remains in **More settings → Diagnostics**.
 
-The audio subtitle is one of:
+**LISTENING MODE** is a vertical list of capability-gated Off, Transparency, Adaptive, and Noise Cancellation items. The observed mode is brighter and gets a right-aligned checkmark; no pills or tiles appear in the main panel. Clicks restore their observed selection until status readback.
 
-- `High-quality playback`
-- `Headset microphone · reduced playback quality`
-- `Audio mode unavailable`
+Capability plus observed-state gating controls the inline native Conversation Awareness and One-Bud ANC `PopupSwitchMenuItem` rows. Their descriptions explain volume lowering and one-pod ANC. Unknown state is not displayed as a false Off value. Ear detection is an inline submenu with the observed right-aligned choice in Shell 50.1's single native expander. The adaptive level submenu appears only where Adaptive is currently observed and supported.
 
-A pending request receives the short `Mode change pending` notice. Applying and command failures also use short main-menu notices. Desired versus observed state, PipeWire profile/codec strings, routing receipts, policy detail, full battery telemetry, stale detail, and Refresh status are confined to **More settings → Diagnostics**.
-
-**Dictation mic** uses a generic `AirPods microphone` label for AirPods sources while retaining literal PipeWire source identifiers for validation and argv. Its controls are capability and status gated; no status text claims a capture was verified or changes the Ubuntu default microphone.
-
-`extension/stylesheet.css` is extension-scoped and inherits GNOME fonts and theme colors. It provides restrained hierarchy, compact spacing, muted supporting labels, truncation, and insensitive states without changing the global GNOME theme. Keyboard focus uses supported `border` and `box-shadow` properties rather than CSS `outline`. The Dictation mic value is the sole child of the native submenu expander and therefore expands right-aligned without competing with the arrow, which remains last. This relies on GNOME Shell 50.1's internal `popup-menu-item-expander` child topology; it uses public actor traversal rather than a private field, but must be re-inspected before supporting a Shell version with a changed `PopupSubMenuMenuItem` implementation.
+Music/Meeting, Dictation mic, diagnostics, adaptive level, and connect/disconnect remain available through **More settings**, keeping the reference panel uncluttered. Desired versus observed state, PipeWire profile/codec strings, routing receipts, policy detail, full battery telemetry, stale detail, and Refresh status are confined to **More settings → Diagnostics**.
 
 ## Normalized Apple contract
 

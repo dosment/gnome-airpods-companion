@@ -126,25 +126,65 @@ class CompanionMenu {
         return row;
     }
 
-    batteryGrid(menu, columns) {
-        // PopupBaseMenuItem only forwards its documented item parameters; set the inherited St.BoxLayout property explicitly.
-        const grid = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false, style_class: 'airpods-battery-grid'});
-        grid.homogeneous = true;
-        grid.label = columns.map(column => `${column.label} · ${column.text}`).join(' | '); // Testable accessible summary.
-        for (const column of columns) {
-            const cell = new St.BoxLayout({vertical: true, x_expand: true, x_align: Clutter.ActorAlign.CENTER, style_class: 'airpods-battery-cell'});
-            const unavailable = column.text === 'Unavailable';
-            cell.add_child(new St.Icon({icon_name: this.batteryDeviceIcon(column.id), x_align: Clutter.ActorAlign.CENTER, style_class: `airpods-battery-icon${unavailable ? ' airpods-battery-icon-unavailable' : ''}`}));
-            cell.add_child(new St.Label({text: column.text, x_align: Clutter.ActorAlign.CENTER, style_class: `airpods-battery-value${unavailable ? ' airpods-battery-value-unavailable' : ''}`}));
-            cell.add_child(new St.Label({text: column.label, x_align: Clutter.ActorAlign.CENTER, style_class: 'airpods-battery-label'}));
-            grid.add_child(cell);
-        }
-        menu.addMenuItem(grid);
-        return grid;
+    header(menu, view) {
+        const row = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false, style_class: 'airpods-header'});
+        const icon = new St.Icon({icon_name: 'audio-headphones-symbolic', style_class: 'airpods-header-icon'});
+        const copy = new St.BoxLayout({vertical: true, x_expand: true, style_class: 'airpods-header-copy'});
+        copy.add_child(new St.Label({text: view.header.title, style_class: 'airpods-header-title'}));
+        copy.add_child(new St.Label({text: view.header.connection, style_class: 'airpods-header-connection'}));
+        row.add_child(icon);
+        row.add_child(copy);
+        row.label = view.header.title;
+        menu.addMenuItem(row);
     }
 
-    batteryDeviceIcon(id) {
-        return id === 'case' ? 'battery-symbolic' : 'audio-headphones-symbolic';
+    batteryRows(menu, columns) {
+        this.row(menu, 'Battery', 'airpods-section-title');
+        for (const column of columns) {
+            const row = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false, style_class: 'airpods-battery-row'});
+            const parsedLevel = Number.parseInt(column.text, 10);
+            const available = Number.isInteger(parsedLevel) && parsedLevel >= 0 && parsedLevel <= 100;
+            const level = available ? parsedLevel : null;
+            const bar = new St.Bin({style_class: 'airpods-battery-track'});
+            if (available)
+                bar.set_child(new St.Widget({style_class: 'airpods-battery-fill', style: `width: ${Math.round(2.2 * level)}px;`}));
+            row.add_child(new St.Label({text: column.label, style_class: 'airpods-battery-name'}));
+            row.add_child(bar);
+            row.add_child(new St.Label({text: column.text, style_class: `airpods-battery-percent${available ? '' : ' airpods-unavailable'}`}));
+            const status = new St.Bin({x_expand: true, x_align: Clutter.ActorAlign.END});
+            status.set_child(new St.Label({text: column.status ?? '', style_class: 'airpods-battery-status'}));
+            row.add_child(status);
+            row.label = `${column.label} ${column.text}${column.status ? ` ${column.status}` : ''}`;
+            menu.addMenuItem(row);
+        }
+    }
+
+    listeningMode(menu, options) {
+        this.row(menu, 'Listening mode', 'airpods-section-title');
+        for (const option of options) {
+            const row = new PopupMenu.PopupMenuItem(safeText(option.label), {style_class: `airpods-listening-row${option.selected ? ' airpods-listening-selected' : ''}`});
+            row.setSensitive(option.enabled);
+            row.accessible_name = `${safeText(option.label)}${option.selected ? ', selected' : ''}`;
+            if (option.selected) {
+                const check = new St.Bin({x_expand: true, x_align: Clutter.ActorAlign.END});
+                check.set_child(new St.Label({text: '✓', style_class: 'airpods-listening-check'}));
+                row.add_child(check);
+            }
+            row.connect('activate', () => this.act('apple', option.argv[1]));
+            menu.addMenuItem(row);
+        }
+    }
+
+    feature(menu, feature) {
+        const row = new PopupMenu.PopupSwitchMenuItem(safeText(feature.label), feature.state, {style_class: 'airpods-feature-row'});
+        row.setSensitive(feature.enabled);
+        row.accessible_name = feature.label;
+        row.connect('toggled', (_row, state) => {
+            row.setToggleState(feature.state); // delivery is not hardware readback
+            if (state !== feature.state) this.act('apple', `${feature.action}:${state ? 'on' : 'off'}`);
+        });
+        menu.addMenuItem(row);
+        this.row(menu, feature.subtitle, 'airpods-feature-subtitle');
     }
 
     segments(menu, options, action, title, tileLayout = false) {
@@ -194,9 +234,10 @@ class CompanionMenu {
         return row;
     }
 
-    submenu(parent, label, icon = null, value = null) {
+    submenu(parent, label, icon = null, value = null, enabled = true) {
         const row = new PopupMenu.PopupSubMenuMenuItem(safeText(label), Boolean(icon));
         if (icon) row.icon.icon_name = icon;
+        row.setSensitive(enabled);
         if (value !== null) {
             const valueLabel = new St.Label({text: safeText(value), x_align: Clutter.ActorAlign.END, style_class: 'airpods-setting-value'});
             // GNOME Shell 50.1's PopupSubMenuMenuItem has one expanding St.Bin
@@ -215,39 +256,42 @@ class CompanionMenu {
         const menu = this.button.menu;
         menu.removeAll();
         const view = popupPresentation(this.status, {stale: this.stale, changing: this.changing, error: this.error});
+        menu.box.add_style_class_name('airpods-popup');
         if (view.notice) this.row(menu, view.notice, `airpods-notice${this.error ? ' airpods-notice-error' : ''}`);
-        this.row(menu, view.header.title, 'airpods-title');
-        this.row(menu, view.header.connection, 'airpods-connection');
+        this.header(menu, view);
         if (view.disconnectedHint) this.row(menu, view.disconnectedHint, 'airpods-section-description');
-        if (view.battery) this.batteryGrid(menu, view.battery.columns);
-
-        if (view.audioMode) {
-            this.row(menu, 'Audio mode', 'airpods-section-title');
-            this.segments(menu, view.audioMode.options, 'mode', 'Audio mode');
-            this.row(menu, view.audioMode.description, 'airpods-section-description');
-            if (view.audioMode.pendingHint) this.row(menu, view.audioMode.pendingHint, 'airpods-section-description');
+        if (view.battery) this.batteryRows(menu, view.battery.columns);
+        if (view.listeningMode) {
+            menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            this.listeningMode(menu, view.listeningMode.options);
         }
-
-        if (view.noiseControl) {
-            this.row(menu, 'Noise control', 'airpods-section-title');
-            this.segments(menu, view.noiseControl.options, 'apple', 'Noise control', true);
+        if (view.features.length) {
+            menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            for (const feature of view.features) this.feature(menu, feature);
         }
-
-        const mic = this.submenu(menu, view.dictation.rowLabel, 'microphone-sensitivity-high-symbolic', view.dictation.summary);
-        for (const option of view.dictation.items)
-            this.action(mic, option.label, option.argv[0] === 'voxtype' && option.argv[1] === 'pin' ? 'voxtype-pin' : 'voxtype-default', option.argv[2] ?? null, option.selected);
+        if (view.earDetection) {
+            menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            const ear = this.submenu(menu, view.earDetection.label, null, view.earDetection.value, view.earDetection.enabled);
+            for (const [key, label] of Object.entries(EAR)) this.action(ear, label, 'apple', `ear:${key}`, this.status?.apple?.state?.ear_detection === key);
+        }
 
         const settings = this.submenu(menu, 'More settings', 'emblem-system-symbolic');
         const apple = this.status?.apple ?? {};
         const state = apple.state ?? {};
         for (const item of view.moreSettings.items) {
             if (item.id === 'diagnostics') continue;
+            if (item.action === 'connect' || item.action === 'disconnect') {
+                this.action(settings, item.label, item.action, null, false, '', view.footer.enabled);
+                continue;
+            }
             const sub = this.submenu(settings, item.label);
-            if (item.action === 'ca' || item.action === 'onebud') {
-                const key = item.action === 'ca' ? 'conversation_awareness' : 'one_bud_anc';
-                const verb = item.action === 'ca' ? 'ca' : 'onebud';
-                this.action(sub, 'On', 'apple', `${verb}:on`, state[key] === true);
-                this.action(sub, 'Off', 'apple', `${verb}:off`, state[key] === false);
+            if (item.action === 'audio-mode') {
+                for (const option of view.audioMode.options) this.action(sub, option.label, 'mode', option.argv[1], option.selected);
+                this.row(sub, view.audioMode.description, 'airpods-section-description');
+                if (view.audioMode.pendingHint) this.row(sub, view.audioMode.pendingHint, 'airpods-section-description');
+            } else if (item.action === 'dictation') {
+                for (const option of view.dictation.items)
+                    this.action(sub, option.label, option.argv[0] === 'voxtype' && option.argv[1] === 'pin' ? 'voxtype-pin' : 'voxtype-default', option.argv[2] ?? null, option.selected);
             } else if (item.action === 'ear') {
                 for (const [key, label] of Object.entries(EAR)) this.action(sub, label, 'apple', `ear:${key}`, state.ear_detection === key);
             } else if (item.action === 'adaptive') {
@@ -263,10 +307,7 @@ class CompanionMenu {
                 diagnostics.addMenuItem(refresh);
             } else this.row(diagnostics, line, 'airpods-diagnostic-line');
         }
-        menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        this.action(menu, view.footer.label, view.footer.action, null, false,
-            view.footer.action === 'connect' ? 'airpods-connect' : '', view.footer.enabled,
-            view.footer.action === 'disconnect' ? 'network-disconnect-symbolic' : 'network-connect-symbolic');
+
     }
 
     destroy() {
