@@ -18,6 +18,17 @@ test('battery never invents values and distinguishes stale observations', () => 
     assert.equal(model.batteryText({available:true,level:42,in_ear:true}, true), '42% · In ear · Stale');
 });
 
+test('battery presentation marks stale readings unavailable while retaining freshness in Diagnostics', () => {
+    const status = model.parseStatus(sample({apple:{available:true, battery:{
+        left:{available:true,level:93,freshness:'unknown'}, right:{available:false}, case:{available:true,level:0,stale:true},
+    }}}));
+    const popup = model.popupPresentation(status);
+    assert.deepEqual(popup.battery.columns.map(column => column.text), ['93%', 'Unavailable', 'Unavailable']);
+    assert.ok(popup.diagnostics.includes('Battery Left: 93% · Observation age unknown'));
+    assert.ok(popup.diagnostics.includes('Battery Case: 0% · Stale'));
+    assert.equal(popup.diagnostics.some(line => /age unknown|Stale/.test(line) && !line.startsWith('Battery ')), false);
+});
+
 test('Apple commands require explicit capabilities and fresh connected state', () => {
     const status = model.parseStatus(sample({apple:{available:true, capabilities:{noise_modes:['anc','adaptive'], conversation_awareness:true, one_bud_anc:true, ear_detection:true, adaptive_level:true}, state:{noise_mode:'adaptive'}}}));
     for (const verb of ['noise:anc','noise:adaptive','ca:on','onebud:off','ear:both','adaptive:25'])
@@ -54,11 +65,15 @@ test('compact popup presentation has native hierarchy, explicit state labels, an
     assert.equal(popup.header.title, 'AirPods');
     assert.equal(popup.header.connection, 'Connected');
     assert.equal(popup.audioMode.description, 'High-quality playback');
-    assert.deepEqual(popup.battery.columns.map(column => column.text), ['82%','78%','—']);
+    assert.deepEqual(popup.battery.columns.map(column => column.text), ['82%','78%','Unavailable']);
     assert.deepEqual(popup.audioMode.options.map(option => [option.label,option.selected,option.argv]), [
         ['Music',true,['mode','music']], ['Meeting',false,['mode','meeting']]]);
-    assert.deepEqual(popup.noiseControl.options.map(option => option.label), ['Off','Transparency','Noise Cancellation','Adaptive']);
+    assert.deepEqual(popup.noiseControl.options.map(option => [option.label, option.icon]), [
+        ['Off', 'audio-volume-muted-symbolic'], ['Transparency', 'audio-speakers-symbolic'],
+        ['Cancellation', 'audio-headphones-symbolic'], ['Adaptive', 'weather-overcast-symbolic'],
+    ]);
     assert.equal(popup.noiseControl.options.find(option => option.id === 'anc').selected, true);
+    assert.equal(popup.dictation.rowLabel, 'Dictation mic');
     assert.equal(popup.dictation.summary, 'AirPods microphone · Restart pending');
     assert.equal(popup.dictation.items.find(item => item.id === 'bluez_input.1').label, 'AirPods microphone');
     assert.deepEqual(popup.moreSettings.items.map(item => item.id), ['conversation-awareness','one-bud-anc','ear-detection','adaptive-level','diagnostics']);

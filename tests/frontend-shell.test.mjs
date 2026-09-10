@@ -17,6 +17,12 @@ function harness() {
     class Item {
         constructor(label) { this.label = label; this.signals = new Map(); this.sensitive = true; this.children = []; }
         add_child(child) { this.children.push(child); }
+        get_children() { return [...this.children]; }
+        insert_child_below(child, sibling) {
+            const index = this.children.indexOf(sibling);
+            if (index < 0) throw new Error('sibling must be a native child');
+            this.children.splice(index, 0, child);
+        }
         connect(name, callback) { const id = ++serial; this.signals.set(id, {name, callback}); return id; }
         disconnect(id) { this.signals.delete(id); }
         setSensitive(value) { this.sensitive = value; }
@@ -35,7 +41,21 @@ function harness() {
         destroy() { this.menu.destroy(); super.destroy(); }
     }
     class Submenu extends Item {
-        constructor(label, wantIcon = false) { super(label); this.wantIcon = wantIcon; this.icon = wantIcon ? {} : null; this.menu = new Menu(); }
+        constructor(label, wantIcon = false) {
+            super(label);
+            this.wantIcon = wantIcon;
+            this.icon = wantIcon ? new Icon() : null;
+            if (this.icon) this.add_child(this.icon);
+            this.nativeLabel = new Label({text: label, y_expand: true});
+            // GNOME Shell 50.1's native PopupSubMenuMenuItem owns this expanding
+            // bin between its label and triangle; it is not exposed as a field.
+            this.nativeExpander = new StBin({x_expand: true, style_class: 'popup-menu-item-expander'});
+            this._triangleBin = new StBin({y_expand: true});
+            this.add_child(this.nativeLabel);
+            this.add_child(this.nativeExpander);
+            this.add_child(this._triangleBin);
+            this.menu = new Menu();
+        }
         destroy() { this.menu.destroy(); super.destroy(); }
     }
     const Gio = {
@@ -62,6 +82,7 @@ function harness() {
     class Label extends Item { constructor(params = {}) { super(params.text); Object.assign(this, params); } }
     class StBin extends Item {
         constructor(params = {}) { super(); Object.assign(this, params); }
+        get_style_class_name() { return this.style_class || ''; }
         add_child() { throw new Error('St.Bin accepts exactly one child through set_child()'); }
         set_child(child) {
             if (this.child) throw new Error('St.Bin already has a child');
@@ -76,13 +97,25 @@ function harness() {
         }
     }
     class Icon extends Item { constructor(params = {}) { super(); Object.assign(this, params); } }
-    const context = vm.createContext({...model,Gio,GLib,St:{Icon,Button:StButton,Bin:StBin,BoxLayout:Box,Label},Extension:class {uuid='gnome-airpods-companion@dosment.github.io';},
-        Main:{panel:{addToStatusArea() {}}},PanelMenu:{Button},PopupMenu:{PopupBaseMenuItem:class extends Item { constructor(params = {}) { super(); Object.assign(this, params); } },PopupMenuItem:Item,PopupImageMenuItem:class extends Item { constructor(label, icon, params = {}) { super(label); this.icon_name = icon; Object.assign(this, params); } },PopupSubMenuMenuItem:Submenu,PopupSeparatorMenuItem:Item,Ornament:{DOT:1}}});
+    const context = vm.createContext({...model,Gio,GLib,Clutter:{ActorAlign:{CENTER:1,END:2}},St:{Icon,Button:StButton,Bin:StBin,BoxLayout:Box,Label},Extension:class {uuid='gnome-airpods-companion@dosment.github.io';},
+        Main:{panel:{addToStatusArea() {}}},PanelMenu:{Button},PopupMenu:{PopupBaseMenuItem:class extends Item { constructor(params = {}) { super(); Object.assign(this, {reactive: params.reactive, can_focus: params.can_focus, style_class: params.style_class}); } },PopupMenuItem:Item,PopupImageMenuItem:class extends Item { constructor(label, icon, params = {}) { super(label); this.icon_name = icon; Object.assign(this, params); } },PopupSubMenuMenuItem:Submenu,PopupSeparatorMenuItem:Item,Ornament:{DOT:1}}});
     vm.runInContext(text.replace(/^import .*;\n/gm,'').replace('export default class','class') + '\nglobalThis.ExtensionUnderTest = AirPodsCompanionExtension;',context);
     const extension = new context.ExtensionUnderTest();
     extension.enable();
     return {extension, controller:extension._companion,timers,processes};
 }
+
+test('stylesheet delegates selected and focused segment treatment to the installed native button theme', () => {
+    const css = readFileSync(new URL('../extension/stylesheet.css', import.meta.url), 'utf8');
+    assert.match(css, /\.airpods-segments \{[\s\S]*spacing: 8px/);
+    assert.match(css, /\.airpods-segments \.airpods-segment \{[\s\S]*min-width: 0/);
+    assert.match(css, /\.airpods-noise-tiles \{[\s\S]*spacing: 6px/);
+    assert.match(css, /\.airpods-noise-tiles \.airpods-segment \{[\s\S]*min-width: 0/);
+    assert.match(css, /\.airpods-segment:checked[\s\S]*font-weight: 700/);
+    assert.match(css, /\.airpods-segment:focus[\s\S]*border: 2px solid/);
+    assert.doesNotMatch(css, /\.airpods-segment-selected/);
+});
+
 
 test('controller uses absolute argv, prevents overlap, and cancels everything on disable', async () => {
     const h = harness();
@@ -151,7 +184,8 @@ test('routing UI distinguishes desired intent, launch receipt, and explicit rest
     await tick();
     const items = h.controller.button.menu.items;
     const micMenu = items.find(item => item.label.startsWith('Dictation mic')).menu.items.map(item => item.label).join('\n');
-    assert.equal(items.find(item => item.label.startsWith('Dictation mic')).label, 'Dictation mic · Unavailable · Restart pending');
+    const micRow = items.find(item => item.label === 'Dictation mic');
+    assert.equal(micRow.nativeExpander.child.label, 'Unavailable · Restart pending');
     assert.doesNotMatch(micMenu,/Effective launch:|Desired routing|capture not verified/i);
     assert.match(items.find(item => item.label === 'More settings').menu.items.find(item => item.label === 'Diagnostics').menu.items.map(item => item.label).join('\n'), /Desired dictation source: new\.mic/);
     const settings = items.find(item => item.label === 'More settings').menu.items.map(item => item.label).join('\n');
@@ -180,29 +214,48 @@ test('compact popup renders native horizontal segments, symbolic batteries, and 
     await tick();
     const items = h.controller.button.menu.items;
     const labels = items.map(item => item.label);
-    assert.deepEqual(labels.slice(0, 4), ['AirPods', 'Connected', 'Left · 82% | Right · 78% | Case · —', 'Audio mode']);
-    assert.deepEqual(items[2].children.map(cell => cell.children.filter(child => child.icon_name).map(icon => icon.icon_name)), [
-        ['battery-level-90-symbolic'], ['battery-level-80-symbolic'], ['battery-missing-symbolic']]);
+    assert.deepEqual(labels.slice(0, 4), ['AirPods', 'Connected', 'Left · 82% | Right · 78% | Case · Unavailable', 'Audio mode']);
+    assert.deepEqual(items[2].children.map(cell => cell.children.map(child => child.icon_name || child.label)), [
+        ['audio-headphones-symbolic', '82%', 'Left'], ['audio-headphones-symbolic', '78%', 'Right'],
+        ['battery-symbolic', 'Unavailable', 'Case'],
+    ]);
     assert.equal(items[2].children[2].children.find(child => child.icon_name).style_class, 'airpods-battery-icon airpods-battery-icon-unavailable');
-    assert.equal(items[2].children[2].children.find(child => child.label === '—').style_class, 'airpods-battery-value airpods-battery-value-unavailable');
+    assert.equal(items[2].children[2].children.find(child => child.label === 'Unavailable').style_class, 'airpods-battery-value airpods-battery-value-unavailable');
+    assert.equal(items[2].homogeneous, true);
+    assert.equal(items[2].children.every(cell => cell.x_align === 1 && cell.children.every(child => child.x_align === 1)), true);
     assert.ok(labels.includes('Audio mode'));
     assert.ok(labels.includes('Noise control'));
-    assert.ok(labels.includes('Dictation mic · AirPods microphone · Restart pending'));
+    const dictation = items.find(item => item.label === 'Dictation mic');
+    const value = dictation.nativeExpander.child;
+    assert.equal(value.label, 'AirPods microphone · Restart pending');
+    assert.equal(value.x_align, 2);
+    assert.notEqual(value.x_expand, true, 'the value does not request a second expansion allocation');
+    assert.equal(dictation.nativeExpander.x_expand, true, 'value occupies the one native expansion region');
+    assert.equal(dictation.children.at(-1), dictation._triangleBin, 'native submenu triangle remains last');
+    assert.equal(dictation.children.filter(child => child.x_expand === true).length, 1, 'no sibling competes for native expansion');
+    assert.equal(dictation.children.at(-2), dictation.nativeExpander, 'native expander stays before the triangle');
     assert.ok(labels.includes('More settings'));
-    const dictation = items.find(item => item.label.startsWith('Dictation mic'));
     const moreSettings = items.find(item => item.label === 'More settings');
     assert.deepEqual([dictation.wantIcon, dictation.icon?.icon_name, moreSettings.wantIcon, moreSettings.icon?.icon_name], [true, 'microphone-sensitivity-high-symbolic', true, 'emblem-system-symbolic']);
     assert.equal(labels.at(-1), 'Disconnect');
     const audio = items.find(item => item.style_class === 'airpods-segment-group' && item.label === 'Audio mode').children[0];
     assert.deepEqual(audio.children.map(button => [button.checked, button.toggle_mode, button.style_class, button.reactive, button.can_focus, button.accessible_name]), [
-        [true, true, 'airpods-segment airpods-segment-selected', true, true, 'Music, selected'],
-        [false, true, 'airpods-segment', true, true, 'Meeting']]);
+        [true, true, 'button airpods-segment', true, true, 'Music, selected'],
+        [false, true, 'button airpods-segment', true, true, 'Meeting']]);
+    assert.equal(audio.homogeneous, true);
     assert.deepEqual(audio.children.map(button => button.child.children.map(child => child.icon_name || child.label)), [
         ['audio-x-generic-symbolic', 'Music'], ['microphone-sensitivity-high-symbolic', 'Meeting']]);
     const noise = items.find(item => item.style_class === 'airpods-segment-group' && item.label === 'Noise control').children[0];
     assert.deepEqual(noise.children.map(button => [button.checked, button.style_class, button.accessible_name]), [
-        [false, 'airpods-segment', 'Off'], [false, 'airpods-segment', 'Transparency'],
-        [true, 'airpods-segment airpods-segment-selected', 'Noise Cancellation, selected'], [false, 'airpods-segment', 'Adaptive']]);
+        [false, 'button airpods-segment', 'Off'], [false, 'button airpods-segment', 'Transparency'],
+        [true, 'button airpods-segment', 'Cancellation, selected'], [false, 'button airpods-segment', 'Adaptive']]);
+    assert.equal(noise.style_class, 'airpods-noise-tiles');
+    assert.equal(noise.homogeneous, true);
+    assert.equal(noise.children.every(button => button.child.vertical === true), true);
+    assert.deepEqual(noise.children.map(button => button.child.children.map(child => child.icon_name || child.label)), [
+        ['audio-volume-muted-symbolic', 'Off'], ['audio-speakers-symbolic', 'Transparency'],
+        ['audio-headphones-symbolic', 'Cancellation'], ['weather-overcast-symbolic', 'Adaptive'],
+    ]);
     assert.equal(items.some(item => item.constructor.name === 'Submenu' && ['Audio mode', 'Noise control'].includes(item.label)), false);
     const settings = items.find(item => item.label === 'More settings').menu.items.map(item => item.label);
     assert.ok(settings.includes('Diagnostics'));

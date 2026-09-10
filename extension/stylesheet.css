@@ -1,50 +1,49 @@
-/* Scoped to AirPods Companion menu items; does not alter the global Shell theme. */
+/* Scoped to AirPods Companion menu items; relies on the active GNOME Shell theme. */
 .airpods-title {
-    font-weight: 800;
-    font-size: 1.15em;
+    font-weight: 700;
     padding-top: 8px;
     padding-bottom: 0;
 }
 
+.airpods-connection,
+.airpods-battery-label,
+.airpods-setting-value,
+.airpods-section-description,
+.airpods-diagnostic-line {
+    opacity: 0.65;
+}
+
 .airpods-connection {
-    color: #b7bcc6;
-    font-size: 0.95em;
     padding-top: 0;
     padding-bottom: 10px;
 }
 
 .airpods-battery-grid {
-    spacing: 0;
+    spacing: 8px;
     padding: 6px 8px 10px;
 }
 
 .airpods-battery-cell {
-    border-left: 1px solid rgba(151, 160, 175, 0.28);
-    padding-left: 8px;
     spacing: 2px;
-}
-
-.airpods-battery-cell:first-child {
-    border-left-width: 0;
 }
 
 .airpods-battery-icon {
     icon-size: 20px;
-    color: #7ad38d;
 }
 
 .airpods-battery-icon-unavailable,
 .airpods-battery-value-unavailable {
-    color: #8d95a3;
+    opacity: 0.55;
 }
 
-.airpods-battery-label {
-    color: #b7bcc6;
+.airpods-battery-label,
+.airpods-section-description,
+.airpods-diagnostic-line,
+.airpods-setting-value {
     font-size: 0.85em;
 }
 
 .airpods-battery-value {
-    color: #d9dde4;
     font-weight: 700;
 }
 
@@ -54,11 +53,9 @@
     padding-bottom: 3px;
 }
 
-.airpods-section-description {
-    color: #b7bcc6;
-    font-size: 0.85em;
-    padding-top: 2px;
-    padding-bottom: 4px;
+.airpods-section-description,
+.airpods-diagnostic-line,
+.airpods-setting-value {
     max-width: 28em;
     white-space: nowrap;
     overflow: hidden;
@@ -66,78 +63,49 @@
 }
 
 .airpods-notice {
-    color: #d9dde4;
-    background-color: rgba(69, 133, 136, 0.20);
-    border: 1px solid #458588;
+    border: 1px solid;
     border-radius: 6px;
     font-weight: 700;
-    max-width: 28em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .airpods-notice-error {
-    color: #ffd7d7;
-    background-color: rgba(160, 55, 55, 0.22);
-    border-color: #b35a5a;
-}
-
-.airpods-diagnostic-line {
-    color: #b7bcc6;
-    font-size: 0.85em;
-    max-width: 28em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.airpods-connect {
-    color: #f2f4f7;
-    background-color: rgba(255, 255, 255, 0.05);
-}
-
-.airpods-connect:hover,
-.airpods-connect:focus {
-    background-color: rgba(185, 212, 255, 0.18);
+    font-weight: 700;
 }
 
 .airpods-segment-group {
-    padding: 0 8px 2px;
+    padding: 0 8px 4px;
 }
 
 .airpods-segments {
-    spacing: 0;
-    border: 1px solid rgba(151, 160, 175, 0.42);
-    border-radius: 9px;
-    background-color: rgba(255, 255, 255, 0.03);
+    spacing: 8px;
 }
 
-.airpods-segment {
-    min-height: 34px;
-    padding: 5px 7px;
-    border-width: 0 0 0 1px;
-    border-color: rgba(151, 160, 175, 0.35);
-    border-radius: 0;
-    color: #f2f4f7;
+.airpods-segments .airpods-segment {
+    min-width: 0;
+    min-height: 36px;
+    padding: 7px 12px;
 }
 
-.airpods-segment:first-child {
-    border-left-width: 0;
-    border-radius: 8px 0 0 8px;
+.airpods-noise-tiles {
+    spacing: 6px;
 }
 
-.airpods-segment:last-child {
-    border-radius: 0 8px 8px 0;
+.airpods-noise-tiles .airpods-segment {
+    min-width: 0;
+    min-height: 66px;
+    padding: 7px 5px;
+}
+
+.airpods-segment-content {
+    spacing: 6px;
+}
+
+.airpods-segment-content-tile {
+    spacing: 4px;
 }
 
 .airpods-segment-icon {
     icon-size: 16px;
-    margin-right: 5px;
-}
-
-.airpods-segment-content {
-    spacing: 5px;
 }
 
 .airpods-segment-label {
@@ -147,18 +115,19 @@
     text-overflow: ellipsis;
 }
 
-.airpods-segment-selected {
-    background-color: #458588;
-    color: #ffffff;
-    font-weight: 700;
-    border-color: transparent;
+.airpods-segment-content-tile .airpods-segment-label {
+    text-align: center;
+    max-width: 9em;
 }
 
-/* St supports borders and box shadows here; CSS outline is not a Shell focus ring. */
-.airpods-segment:focus,
-.airpods-segment-selected:focus {
-    border: 2px solid #b9d4ff;
-    box-shadow: 0 0 0 1px rgba(185, 212, 255, 0.45);
+.airpods-segment:checked {
+    font-weight: 700;
+}
+
+/* The installed Shell's .button:checked supplies the selected fill; retain a focus boundary. */
+.airpods-segment:focus {
+    border: 2px solid;
+    box-shadow: 0 0 0 1px;
 }
 
 .airpods-segment-disabled {

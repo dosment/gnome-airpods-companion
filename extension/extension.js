@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -126,31 +127,30 @@ class CompanionMenu {
     }
 
     batteryGrid(menu, columns) {
+        // PopupBaseMenuItem only forwards its documented item parameters; set the inherited St.BoxLayout property explicitly.
         const grid = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false, style_class: 'airpods-battery-grid'});
+        grid.homogeneous = true;
         grid.label = columns.map(column => `${column.label} · ${column.text}`).join(' | '); // Testable accessible summary.
         for (const column of columns) {
-            const cell = new St.BoxLayout({vertical: true, x_expand: true, style_class: 'airpods-battery-cell'});
-            const unavailable = column.text === '—';
-            cell.add_child(new St.Icon({icon_name: this.batteryIcon(column.text), style_class: `airpods-battery-icon${unavailable ? ' airpods-battery-icon-unavailable' : ''}`}));
-            cell.add_child(new St.Label({text: column.label, style_class: 'airpods-battery-label'}));
-            cell.add_child(new St.Label({text: column.text, style_class: `airpods-battery-value${unavailable ? ' airpods-battery-value-unavailable' : ''}`}));
+            const cell = new St.BoxLayout({vertical: true, x_expand: true, x_align: Clutter.ActorAlign.CENTER, style_class: 'airpods-battery-cell'});
+            const unavailable = column.text === 'Unavailable';
+            cell.add_child(new St.Icon({icon_name: this.batteryDeviceIcon(column.id), x_align: Clutter.ActorAlign.CENTER, style_class: `airpods-battery-icon${unavailable ? ' airpods-battery-icon-unavailable' : ''}`}));
+            cell.add_child(new St.Label({text: column.text, x_align: Clutter.ActorAlign.CENTER, style_class: `airpods-battery-value${unavailable ? ' airpods-battery-value-unavailable' : ''}`}));
+            cell.add_child(new St.Label({text: column.label, x_align: Clutter.ActorAlign.CENTER, style_class: 'airpods-battery-label'}));
             grid.add_child(cell);
         }
         menu.addMenuItem(grid);
         return grid;
     }
 
-    batteryIcon(text) {
-        const level = Number.parseInt(text, 10);
-        if (!Number.isInteger(level) || level < 0 || level > 100) return 'battery-missing-symbolic';
-        if (level >= 95) return 'battery-full-symbolic';
-        return `battery-level-${Math.max(0, Math.min(90, Math.ceil(level / 10) * 10))}-symbolic`;
+    batteryDeviceIcon(id) {
+        return id === 'case' ? 'battery-symbolic' : 'audio-headphones-symbolic';
     }
 
-    segments(menu, options, action, title) {
+    segments(menu, options, action, title, tileLayout = false) {
         const group = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false, style_class: 'airpods-segment-group'});
         group.label = title;
-        const box = new St.BoxLayout({x_expand: true, style_class: 'airpods-segments'});
+        const box = new St.BoxLayout({x_expand: true, homogeneous: true, style_class: tileLayout ? 'airpods-noise-tiles' : 'airpods-segments'});
         for (const option of options) {
             const enabled = option.enabled === true && !this.pending && !this.changing && !this.stale;
             const selected = option.selected === true;
@@ -160,10 +160,10 @@ class CompanionMenu {
                 reactive: enabled,
                 can_focus: enabled,
                 x_expand: true,
-                style_class: `airpods-segment${selected ? ' airpods-segment-selected' : ''}${enabled ? '' : ' airpods-segment-disabled'}`,
+                style_class: `button airpods-segment${enabled ? '' : ' airpods-segment-disabled'}`,
                 accessible_name: `${safeText(option.label)}${selected ? ', selected' : ''}`,
             });
-            const content = new St.BoxLayout({x_expand: true, style_class: 'airpods-segment-content'});
+            const content = new St.BoxLayout({vertical: tileLayout, x_expand: true, style_class: `airpods-segment-content${tileLayout ? ' airpods-segment-content-tile' : ''}`});
             content.add_child(new St.Icon({icon_name: option.icon || 'audio-speakers-symbolic', style_class: 'airpods-segment-icon'}));
             content.add_child(new St.Label({text: safeText(option.label), style_class: 'airpods-segment-label'}));
             // St.Button inherits St.Bin: it owns one child, so put the icon/label row in a box.
@@ -194,9 +194,18 @@ class CompanionMenu {
         return row;
     }
 
-    submenu(parent, label, icon = null) {
+    submenu(parent, label, icon = null, value = null) {
         const row = new PopupMenu.PopupSubMenuMenuItem(safeText(label), Boolean(icon));
         if (icon) row.icon.icon_name = icon;
+        if (value !== null) {
+            const valueLabel = new St.Label({text: safeText(value), x_align: Clutter.ActorAlign.END, style_class: 'airpods-setting-value'});
+            // GNOME Shell 50.1's PopupSubMenuMenuItem has one expanding St.Bin
+            // (class popup-menu-item-expander) before its triangle. Use that bin
+            // rather than adding a second x_expand sibling.
+            const expander = row.get_children().find(child => child.get_style_class_name?.() === 'popup-menu-item-expander');
+            if (!expander) throw new Error('PopupSubMenuMenuItem has no native expander');
+            expander.set_child(valueLabel);
+        }
         parent.addMenuItem(row);
         return row.menu;
     }
@@ -221,10 +230,10 @@ class CompanionMenu {
 
         if (view.noiseControl) {
             this.row(menu, 'Noise control', 'airpods-section-title');
-            this.segments(menu, view.noiseControl.options, 'apple', 'Noise control');
+            this.segments(menu, view.noiseControl.options, 'apple', 'Noise control', true);
         }
 
-        const mic = this.submenu(menu, `Dictation mic · ${view.dictation.summary}`, 'microphone-sensitivity-high-symbolic');
+        const mic = this.submenu(menu, view.dictation.rowLabel, 'microphone-sensitivity-high-symbolic', view.dictation.summary);
         for (const option of view.dictation.items)
             this.action(mic, option.label, option.argv[0] === 'voxtype' && option.argv[1] === 'pin' ? 'voxtype-pin' : 'voxtype-default', option.argv[2] ?? null, option.selected);
 

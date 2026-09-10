@@ -71,10 +71,8 @@ function observedAudioMode(profile) {
 }
 
 function compactBatteryText(value, stale = false) {
-    if (!value || value.available !== true || !Number.isInteger(value.level) || value.level < 0 || value.level > 100)
-        return '—';
-    if (stale || value.stale === true) return `${value.level}% · stale`;
-    if (value.freshness === 'unknown') return `${value.level}% · age unknown`;
+    if (!value || value.available !== true || !Number.isInteger(value.level) || value.level < 0 || value.level > 100 || stale || value.stale === true)
+        return 'Unavailable';
     return `${value.level}%`;
 }
 
@@ -88,7 +86,8 @@ export function popupPresentation(status, {stale = false, changing = false, erro
     const apple = status?.apple ?? {};
     const cap = apple.capabilities ?? {};
     const state = apple.state ?? {};
-    const noiseNames = {off: 'Off', anc: 'Noise Cancellation', transparency: 'Transparency', adaptive: 'Adaptive'};
+    const noiseNames = {off: 'Off', anc: 'Cancellation', transparency: 'Transparency', adaptive: 'Adaptive'};
+    const noiseIcons = {off: 'audio-volume-muted-symbolic', transparency: 'audio-speakers-symbolic', anc: 'audio-headphones-symbolic', adaptive: 'weather-overcast-symbolic'};
     const noiseOrder = ['off', 'transparency', 'anc', 'adaptive'];
     const noiseModes = noiseOrder.filter(mode => Array.isArray(cap.noise_modes) && cap.noise_modes.includes(mode));
     const connected = status?.connected === true;
@@ -102,12 +101,12 @@ export function popupPresentation(status, {stale = false, changing = false, erro
         {id: 'music', label: 'Music', icon: 'audio-x-generic-symbolic', selected: observed === 'music', enabled: enabled('mode', 'music'), argv: ['mode', 'music']},
         {id: 'meeting', label: 'Meeting', icon: 'microphone-sensitivity-high-symbolic', selected: observed === 'meeting', enabled: enabled('mode', 'meeting'), argv: ['mode', 'meeting']},
     ]} : null;
-    const noiseControl = connected && noiseModes.length ? {options: noiseModes.map(id => ({id, label: noiseNames[id],
+    const noiseControl = connected && noiseModes.length ? {options: noiseModes.map(id => ({id, label: noiseNames[id], icon: noiseIcons[id],
         selected: state.noise_mode === id, enabled: enabled('apple', `noise:${id}`), argv: ['apple', `noise:${id}`]}))} : null;
     const vox = status?.voxtype ?? {};
     const pinnedSource = Array.isArray(status?.microphones) ? status.microphones.find(source => source?.name === vox.source) : null;
     const micName = vox.mode === 'pinned' ? (pinnedSource ? genericSourceLabel(pinnedSource) : 'Unavailable') : 'System default';
-    const dictation = {summary: `${micName}${vox.pending_restart === true ? ' · Restart pending' : ''}`,
+    const dictation = {rowLabel: 'Dictation mic', summary: `${micName}${vox.pending_restart === true ? ' · Restart pending' : ''}`,
         enabled: status?.connected === true && !stale && !changing, items: [{id: 'default', label: 'Follow Ubuntu default input', selected: vox.mode !== 'pinned', enabled: enabled('voxtype-default'), argv: ['voxtype', 'default']},
             ...(Array.isArray(status?.microphones) ? status.microphones.map(source => ({id: source.name, label: genericSourceLabel(source),
                 selected: vox.mode === 'pinned' && vox.source === source.name, enabled: enabled('voxtype-pin', source.name), argv: ['voxtype', 'pin', source.name]})) : [])]};
