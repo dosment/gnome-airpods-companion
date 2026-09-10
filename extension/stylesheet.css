@@ -33,6 +33,11 @@
     color: #7ad38d;
 }
 
+.airpods-battery-icon-unavailable,
+.airpods-battery-value-unavailable {
+    color: #8d95a3;
+}
+
 .airpods-battery-label {
     color: #b7bcc6;
     font-size: 0.85em;
@@ -85,6 +90,16 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.airpods-connect {
+    color: #f2f4f7;
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.airpods-connect:hover,
+.airpods-connect:focus {
+    background-color: rgba(185, 212, 255, 0.18);
 }
 
 .airpods-segment-group {

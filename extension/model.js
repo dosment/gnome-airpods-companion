@@ -72,10 +72,15 @@ function observedAudioMode(profile) {
 
 function compactBatteryText(value, stale = false) {
     if (!value || value.available !== true || !Number.isInteger(value.level) || value.level < 0 || value.level > 100)
-        return 'Unavailable';
+        return '—';
     if (stale || value.stale === true) return `${value.level}% · stale`;
     if (value.freshness === 'unknown') return `${value.level}% · age unknown`;
     return `${value.level}%`;
+}
+
+function genericSourceLabel(source) {
+    const visibleName = `${source?.description ?? ''} ${source?.name ?? ''}`;
+    return /airpods/i.test(visibleName) ? 'AirPods microphone' : (source?.description || source?.name || 'Unavailable');
 }
 
 export function popupPresentation(status, {stale = false, changing = false, error = ''} = {}) {
@@ -86,31 +91,31 @@ export function popupPresentation(status, {stale = false, changing = false, erro
     const noiseNames = {off: 'Off', anc: 'Noise Cancellation', transparency: 'Transparency', adaptive: 'Adaptive'};
     const noiseOrder = ['off', 'transparency', 'anc', 'adaptive'];
     const noiseModes = noiseOrder.filter(mode => Array.isArray(cap.noise_modes) && cap.noise_modes.includes(mode));
+    const connected = status?.connected === true;
     const batteryParts = apple.is_headset === true ? [['headset', 'Headphones']] : [['left', 'Left'], ['right', 'Right'], ['case', 'Case']];
-    const battery = {columns: batteryParts.map(([id, label]) => ({id, label,
-        text: compactBatteryText(apple.battery?.[id], stale || !status?.connected || apple.available !== true || apple.stale === true)}))};
+    const battery = connected ? {columns: batteryParts.map(([id, label]) => ({id, label,
+        text: compactBatteryText(apple.battery?.[id], stale || apple.available !== true || apple.stale === true)}))} : null;
     const desired = status?.desired_mode;
     const observed = observedAudioMode(status?.active_profile);
-    const observedLabel = observed ? (observed === 'music' ? 'Music' : 'Meeting') : 'Unavailable';
-    const audioMode = {description: `Observed: ${observedLabel}`,
-        pendingHint: desired && desired !== observed ? `Requested ${desired === 'music' ? 'Music' : 'Meeting'} · observed ${observedLabel}` : null, options: [
+    const audioMode = connected ? {description: observed === 'music' ? 'High-quality playback' : observed === 'meeting' ? 'Headset microphone · reduced playback quality' : 'Audio mode unavailable',
+        pendingHint: desired && desired !== observed ? 'Mode change pending' : null, options: [
         {id: 'music', label: 'Music', icon: 'audio-x-generic-symbolic', selected: observed === 'music', enabled: enabled('mode', 'music'), argv: ['mode', 'music']},
         {id: 'meeting', label: 'Meeting', icon: 'microphone-sensitivity-high-symbolic', selected: observed === 'meeting', enabled: enabled('mode', 'meeting'), argv: ['mode', 'meeting']},
-    ]};
-    const noiseControl = noiseModes.length ? {options: noiseModes.map(id => ({id, label: noiseNames[id],
+    ]} : null;
+    const noiseControl = connected && noiseModes.length ? {options: noiseModes.map(id => ({id, label: noiseNames[id],
         selected: state.noise_mode === id, enabled: enabled('apple', `noise:${id}`), argv: ['apple', `noise:${id}`]}))} : null;
     const vox = status?.voxtype ?? {};
     const pinnedSource = Array.isArray(status?.microphones) ? status.microphones.find(source => source?.name === vox.source) : null;
-    const micName = vox.mode === 'pinned' ? (pinnedSource?.description || vox.source || 'Unavailable') : 'System default';
+    const micName = vox.mode === 'pinned' ? (pinnedSource ? genericSourceLabel(pinnedSource) : 'Unavailable') : 'System default';
     const dictation = {summary: `${micName}${vox.pending_restart === true ? ' · Restart pending' : ''}`,
         enabled: status?.connected === true && !stale && !changing, items: [{id: 'default', label: 'Follow Ubuntu default input', selected: vox.mode !== 'pinned', enabled: enabled('voxtype-default'), argv: ['voxtype', 'default']},
-            ...(Array.isArray(status?.microphones) ? status.microphones.map(source => ({id: source.name, label: source.description || source.name,
+            ...(Array.isArray(status?.microphones) ? status.microphones.map(source => ({id: source.name, label: genericSourceLabel(source),
                 selected: vox.mode === 'pinned' && vox.source === source.name, enabled: enabled('voxtype-pin', source.name), argv: ['voxtype', 'pin', source.name]})) : [])]};
     const moreItems = [];
-    if (cap.conversation_awareness === true) moreItems.push({id: 'conversation-awareness', label: `Conversation Awareness · Reported: ${state.conversation_awareness === true ? 'On' : state.conversation_awareness === false ? 'Off' : 'Unknown'}`, action: 'ca'});
-    if (cap.one_bud_anc === true) moreItems.push({id: 'one-bud-anc', label: `One-Bud ANC · Reported: ${state.one_bud_anc === true ? 'On' : state.one_bud_anc === false ? 'Off' : 'Unknown'}`, action: 'onebud'});
-    if (cap.ear_detection === true) moreItems.push({id: 'ear-detection', label: `Ear detection · Local policy: ${{one: 'Pause when one is out', both: 'Pause when both are out', off: 'Never pause'}[state.ear_detection] || 'Unknown'}`, action: 'ear'});
-    if (cap.adaptive_level === true) moreItems.push({id: 'adaptive-level', label: `Adaptive noise level · Reported: ${Number.isInteger(state.adaptive_level) ? state.adaptive_level : 'Unknown'}${state.noise_mode === 'adaptive' ? '' : ' · Select Adaptive to change'}`, action: 'adaptive'});
+    if (cap.conversation_awareness === true) moreItems.push({id: 'conversation-awareness', label: `Conversation Awareness · ${state.conversation_awareness === true ? 'On' : state.conversation_awareness === false ? 'Off' : 'Unknown'}`, action: 'ca'});
+    if (cap.one_bud_anc === true) moreItems.push({id: 'one-bud-anc', label: `One-Bud ANC · ${state.one_bud_anc === true ? 'On' : state.one_bud_anc === false ? 'Off' : 'Unknown'}`, action: 'onebud'});
+    if (cap.ear_detection === true) moreItems.push({id: 'ear-detection', label: 'Ear detection', action: 'ear'});
+    if (cap.adaptive_level === true) moreItems.push({id: 'adaptive-level', label: `Adaptive noise level${Number.isInteger(state.adaptive_level) ? ` · ${state.adaptive_level}%` : ''}`, action: 'adaptive'});
     moreItems.push({id: 'diagnostics', label: 'Diagnostics', action: 'diagnostics'});
     const diagnostics = [
         changing ? 'Applying… Waiting for status readback' : null,
@@ -118,19 +123,27 @@ export function popupPresentation(status, {stale = false, changing = false, erro
         status?.error ? `Backend: ${safeText(status.error)}` : null,
         apple.error ? `Apple: ${safeText(apple.error)}` : null,
         stale ? 'Status unavailable · Retained observations are stale' : null,
+        desired ? `Desired audio mode: ${desired}` : null,
+        observed ? `Observed audio mode: ${observed}` : null,
+        vox.mode === 'pinned' ? `Desired dictation source: ${safeText(vox.source || 'Unknown')}` : 'Desired dictation source: Ubuntu default input',
+        vox.effective ? `Effective dictation source: ${vox.effective.mode === 'pinned' ? safeText(vox.effective.source || 'Unknown') : 'Ubuntu default input'}` : null,
         status?.active_profile ? `Observed PipeWire profile: ${safeText(status.active_profile)}` : null,
         status?.active_profile_description ? `Profile detail: ${safeText(status.active_profile_description)}` : null,
-        ...battery.columns.map(column => {
+        ...((battery?.columns ?? []).map(column => {
             const value = apple.battery?.[column.id];
             if (!value || value.available !== true) return `Battery ${column.label}: Unavailable`;
             return `Battery ${column.label}: ${value.level}%${value.charging === true ? ' · Charging' : ''}${value.in_ear === true ? ' · In ear' : ''}${value.stale === true ? ' · Stale' : ''}${value.freshness === 'unknown' ? ' · Observation age unknown' : ''}`;
-        }),
+        })),
         'Refresh status',
     ].filter(Boolean);
-    const footer = {label: status?.connected ? 'Disconnect' : 'Connect', action: status?.connected ? 'disconnect' : 'connect', enabled: enabled(status?.connected ? 'disconnect' : 'connect')};
-    const notice = changing ? 'Applying…' : error ? `Error: ${safeText(error)}` : null;
-    return {status, notice, header: {title: safeText(status?.device_name || 'AirPods Companion'), connection: stale ? 'Status unavailable · Last reading is stale' : status ? (status.connected ? 'Connected' : 'Disconnected') : 'Reading companion status…'}, battery, audioMode, noiseControl, dictation, moreSettings: {items: moreItems}, diagnostics, footer,
-        sections: ['header', 'battery', 'audio-mode', 'noise-control', 'dictation', 'more-settings', 'footer'].map(id => ({id}))};
+    const footer = {label: connected ? 'Disconnect' : 'Connect', action: connected ? 'disconnect' : 'connect', enabled: enabled(connected ? 'disconnect' : 'connect')};
+    const notice = changing ? 'Applying…' : error ? 'Couldn’t apply change' : null;
+    const sections = connected
+        ? ['header', 'battery', 'audio-mode', 'noise-control', 'dictation', 'more-settings', 'footer']
+        : ['header', 'disconnected-hint', 'dictation', 'more-settings', 'footer'];
+    return {status, notice, header: {title: 'AirPods', connection: stale ? 'Status unavailable · Last reading is stale' : status ? (connected ? 'Connected' : 'Disconnected') : 'Reading companion status…'},
+        disconnectedHint: connected ? null : 'Connect to see battery levels', battery, audioMode, noiseControl, dictation, moreSettings: {items: moreItems}, diagnostics, footer,
+        sections: sections.map(id => ({id}))};
 }
 
 export function safeText(value) {

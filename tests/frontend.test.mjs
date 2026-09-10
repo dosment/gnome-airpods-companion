@@ -42,8 +42,8 @@ test('command argv keeps microphone names literal and validates selections', () 
 
 test('compact popup presentation has native hierarchy, explicit state labels, and no invented battery', () => {
     const status = model.parseStatus(sample({
-        device_name:'Dan’s AirPods', active_profile_description:'High Fidelity Playback (A2DP)',
-        microphones:[{name:'bluez_input.1',description:'AirPods microphone'}],
+        device_name:'My AirPods', active_profile_description:'High Fidelity Playback (A2DP)',
+        microphones:[{name:'bluez_input.1',description:'My AirPods microphone'}],
         voxtype:{mode:'pinned',source:'bluez_input.1',effective:{mode:'default',source:null},integration:'wrapper_running',pending_restart:true},
         apple:{available:true, capabilities:{noise_modes:['off','anc','transparency','adaptive'],conversation_awareness:true,one_bud_anc:true,ear_detection:true,adaptive_level:true},
             battery:{left:{available:true,level:82},right:{available:true,level:78},case:{available:false}},
@@ -51,27 +51,33 @@ test('compact popup presentation has native hierarchy, explicit state labels, an
     }));
     const popup = model.popupPresentation(status);
     assert.deepEqual(popup.sections.map(section => section.id), ['header','battery','audio-mode','noise-control','dictation','more-settings','footer']);
-    assert.equal(popup.header.title, 'Dan’s AirPods');
+    assert.equal(popup.header.title, 'AirPods');
     assert.equal(popup.header.connection, 'Connected');
-    assert.deepEqual(popup.battery.columns.map(column => column.text), ['82%','78%','Unavailable']);
+    assert.equal(popup.audioMode.description, 'High-quality playback');
+    assert.deepEqual(popup.battery.columns.map(column => column.text), ['82%','78%','—']);
     assert.deepEqual(popup.audioMode.options.map(option => [option.label,option.selected,option.argv]), [
         ['Music',true,['mode','music']], ['Meeting',false,['mode','meeting']]]);
     assert.deepEqual(popup.noiseControl.options.map(option => option.label), ['Off','Transparency','Noise Cancellation','Adaptive']);
     assert.equal(popup.noiseControl.options.find(option => option.id === 'anc').selected, true);
     assert.equal(popup.dictation.summary, 'AirPods microphone · Restart pending');
+    assert.equal(popup.dictation.items.find(item => item.id === 'bluez_input.1').label, 'AirPods microphone');
     assert.deepEqual(popup.moreSettings.items.map(item => item.id), ['conversation-awareness','one-bud-anc','ear-detection','adaptive-level','diagnostics']);
     assert.equal(popup.footer.label, 'Disconnect');
 });
 
-test('compact presentation explicitly gates unavailable controls and labels retained status stale', () => {
-    const status = model.parseStatus(sample({connected:false, apple:{available:false}}));
-    const popup = model.popupPresentation(status, {stale:true, changing:true});
-    assert.equal(popup.header.connection, 'Status unavailable · Last reading is stale');
-    assert.equal(popup.audioMode.options.every(option => option.enabled === false), true);
+test('disconnected presentation is generic and keeps only connection, routing, settings, and Connect', () => {
+    const status = model.parseStatus(sample({device_name:'My AirPods', connected:false, apple:{available:false}}));
+    const popup = model.popupPresentation(status);
+    assert.equal(popup.header.title, 'AirPods');
+    assert.equal(popup.header.connection, 'Disconnected');
+    assert.equal(popup.disconnectedHint, 'Connect to see battery levels');
+    assert.deepEqual(popup.sections.map(section => section.id), ['header', 'disconnected-hint', 'dictation', 'more-settings', 'footer']);
+    assert.equal(popup.battery, null);
+    assert.equal(popup.audioMode, null);
     assert.equal(popup.noiseControl, null);
-    assert.equal(popup.moreSettings.items.length, 1);
-    assert.equal(popup.moreSettings.items[0].id, 'diagnostics');
-    assert.match(popup.diagnostics[0], /Applying.*readback/);
+    assert.ok(popup.dictation);
+    assert.ok(popup.moreSettings);
+    assert.deepEqual(popup.footer, {label:'Connect', action:'connect', enabled:true});
 });
 
 test('CLI failures and machine control errors surface safely, never count as status', () => {
@@ -95,17 +101,19 @@ test('audio selection follows the observed PipeWire profile and configuration wa
     const a2dp = model.parseStatus(sample({desired_mode:'meeting', active_profile:'a2dp-sink-sbc_xq'}));
     const music = model.popupPresentation(a2dp);
     assert.deepEqual(music.audioMode.options.map(option => [option.id, option.selected]), [['music',true], ['meeting',false]]);
-    assert.match(music.audioMode.pendingHint, /Requested Meeting.*observed Music/i);
+    assert.equal(music.audioMode.description, 'High-quality playback');
+    assert.equal(music.audioMode.pendingHint, 'Mode change pending');
 
     const hfp = model.popupPresentation(model.parseStatus(sample({desired_mode:'music', active_profile:'headset-head-unit-msbc'})));
     assert.deepEqual(hfp.audioMode.options.map(option => option.selected), [false,true]);
-    assert.match(hfp.audioMode.pendingHint, /Requested Music.*observed Meeting/i);
+    assert.equal(hfp.audioMode.description, 'Headset microphone · reduced playback quality');
+    assert.equal(hfp.audioMode.pendingHint, 'Mode change pending');
 
     const unknown = model.popupPresentation(model.parseStatus(sample({active_profile:'vendor-profile'})));
     assert.deepEqual(unknown.audioMode.options.map(option => option.selected), [false,false]);
 
     const disconnected = model.popupPresentation(model.parseStatus(sample({connected:false, apple:{available:false}})));
-    assert.equal(disconnected.audioMode.options.every(option => option.enabled === false), true);
+    assert.equal(disconnected.audioMode, null);
     assert.equal(disconnected.dictation.items.every(item => item.enabled === false), true);
     assert.equal(disconnected.footer.label, 'Connect');
     assert.equal(disconnected.footer.enabled, true);

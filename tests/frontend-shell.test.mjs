@@ -110,7 +110,9 @@ test('controller preserves last observed status as stale and recovers from comma
     h.processes[1].finish('',1,'test rejection');
     await tick();
     assert.equal(h.controller.error,'test rejection');
-    assert.equal(h.controller.button.menu.items[0].label, 'Error: test rejection');
+    assert.equal(h.controller.button.menu.items[0].label, 'Couldn’t apply change');
+    const diagnosticLines = h.controller.button.menu.items.find(item => item.label === 'More settings').menu.items.find(item => item.label === 'Diagnostics').menu.items.map(item => item.label);
+    assert.ok(diagnosticLines.includes('Error: test rejection'));
     h.processes[2].finish(fixture);
     await command;
     assert.equal(h.controller.status.desired_mode,'meeting');
@@ -148,17 +150,16 @@ test('routing UI distinguishes desired intent, launch receipt, and explicit rest
     h.processes[0].finish(JSON.stringify(state));
     await tick();
     const items = h.controller.button.menu.items;
-    const mic = items.find(item => item.label.startsWith('Dictation mic')).menu.items.map(item => item.label).join('\n');
-    assert.equal(items.find(item => item.label.startsWith('Dictation mic')).label, 'Dictation mic · new.mic · Restart pending');
-    assert.match(mic,/Effective launch: Ubuntu default input/);
-    assert.match(items.find(item => item.label.startsWith('Dictation mic')).label,/Restart pending/i);
-    assert.match(mic,/capture not verified/i);
-    assert.doesNotMatch(mic,/until active dictation finishes/);
+    const micMenu = items.find(item => item.label.startsWith('Dictation mic')).menu.items.map(item => item.label).join('\n');
+    assert.equal(items.find(item => item.label.startsWith('Dictation mic')).label, 'Dictation mic · Unavailable · Restart pending');
+    assert.doesNotMatch(micMenu,/Effective launch:|Desired routing|capture not verified/i);
+    assert.match(items.find(item => item.label === 'More settings').menu.items.find(item => item.label === 'Diagnostics').menu.items.map(item => item.label).join('\n'), /Desired dictation source: new\.mic/);
     const settings = items.find(item => item.label === 'More settings').menu.items.map(item => item.label).join('\n');
-    assert.match(settings,/Conversation Awareness · Reported: On/);
-    assert.match(settings,/One-Bud ANC · Reported: On/);
-    assert.match(settings,/Adaptive noise level · Reported: 40/);
-    assert.match(settings,/Ear detection · Local policy:/);
+    assert.match(settings,/Conversation Awareness · On/);
+    assert.match(settings,/One-Bud ANC · On/);
+    assert.match(settings,/Adaptive noise level · 40%/);
+    assert.match(settings,/Ear detection/);
+    assert.doesNotMatch(settings,/Reported:|Local policy:|Select Adaptive/);
     h.extension.disable();
 });
 
@@ -166,7 +167,7 @@ test('compact popup renders native horizontal segments, symbolic batteries, and 
     const h = harness();
     const state = JSON.parse(fixture);
     state.connected = true;
-    state.device_name = 'Dan’s AirPods';
+    state.device_name = 'My AirPods';
     state.desired_mode = 'music';
     state.active_profile = 'a2dp-sink-sbc_xq';
     state.active_profile_description = 'High Fidelity Playback';
@@ -179,9 +180,11 @@ test('compact popup renders native horizontal segments, symbolic batteries, and 
     await tick();
     const items = h.controller.button.menu.items;
     const labels = items.map(item => item.label);
-    assert.deepEqual(labels.slice(0, 4), ['Dan’s AirPods', 'Connected', 'Left · 82% | Right · 78% | Case · Unavailable', 'Audio mode']);
+    assert.deepEqual(labels.slice(0, 4), ['AirPods', 'Connected', 'Left · 82% | Right · 78% | Case · —', 'Audio mode']);
     assert.deepEqual(items[2].children.map(cell => cell.children.filter(child => child.icon_name).map(icon => icon.icon_name)), [
         ['battery-level-90-symbolic'], ['battery-level-80-symbolic'], ['battery-missing-symbolic']]);
+    assert.equal(items[2].children[2].children.find(child => child.icon_name).style_class, 'airpods-battery-icon airpods-battery-icon-unavailable');
+    assert.equal(items[2].children[2].children.find(child => child.label === '—').style_class, 'airpods-battery-value airpods-battery-value-unavailable');
     assert.ok(labels.includes('Audio mode'));
     assert.ok(labels.includes('Noise control'));
     assert.ok(labels.includes('Dictation mic · AirPods microphone · Restart pending'));
@@ -219,7 +222,8 @@ test('audio main menu stays compact while diagnostics retains observed codec det
     h.processes[0].finish(JSON.stringify(state));
     await tick();
     const items = h.controller.button.menu.items;
-    assert.match(items.map(item => item.label).join('\n'),/Observed: Meeting/);
+    assert.match(items.map(item => item.label).join('\n'),/Headset microphone · reduced playback quality/);
+    assert.doesNotMatch(items.map(item => item.label).join('\n'),/Observed:|Requested .*observed/i);
     const diagnostics = items.find(item => item.label === 'More settings').menu.items.find(item => item.label === 'Diagnostics').menu.items.map(item => item.label).join('\n');
     assert.match(diagnostics,/LC3-24kHz/);
     h.extension.disable();

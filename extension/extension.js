@@ -130,9 +130,10 @@ class CompanionMenu {
         grid.label = columns.map(column => `${column.label} · ${column.text}`).join(' | '); // Testable accessible summary.
         for (const column of columns) {
             const cell = new St.BoxLayout({vertical: true, x_expand: true, style_class: 'airpods-battery-cell'});
-            cell.add_child(new St.Icon({icon_name: this.batteryIcon(column.text), style_class: 'airpods-battery-icon'}));
+            const unavailable = column.text === '—';
+            cell.add_child(new St.Icon({icon_name: this.batteryIcon(column.text), style_class: `airpods-battery-icon${unavailable ? ' airpods-battery-icon-unavailable' : ''}`}));
             cell.add_child(new St.Label({text: column.label, style_class: 'airpods-battery-label'}));
-            cell.add_child(new St.Label({text: column.text, style_class: 'airpods-battery-value'}));
+            cell.add_child(new St.Label({text: column.text, style_class: `airpods-battery-value${unavailable ? ' airpods-battery-value-unavailable' : ''}`}));
             grid.add_child(cell);
         }
         menu.addMenuItem(grid);
@@ -208,13 +209,15 @@ class CompanionMenu {
         if (view.notice) this.row(menu, view.notice, `airpods-notice${this.error ? ' airpods-notice-error' : ''}`);
         this.row(menu, view.header.title, 'airpods-title');
         this.row(menu, view.header.connection, 'airpods-connection');
-        this.batteryGrid(menu, view.battery.columns);
+        if (view.disconnectedHint) this.row(menu, view.disconnectedHint, 'airpods-section-description');
+        if (view.battery) this.batteryGrid(menu, view.battery.columns);
 
-        this.row(menu, 'Audio mode', 'airpods-section-title');
-        this.segments(menu, view.audioMode.options, 'mode', 'Audio mode');
-        this.row(menu, view.audioMode.description, 'airpods-section-description');
-        if (view.audioMode.pendingHint) this.row(menu, view.audioMode.pendingHint, 'airpods-section-description');
-        this.row(menu, 'Modes route playback to AirPods; they never set Ubuntu’s default microphone.', 'airpods-section-description');
+        if (view.audioMode) {
+            this.row(menu, 'Audio mode', 'airpods-section-title');
+            this.segments(menu, view.audioMode.options, 'mode', 'Audio mode');
+            this.row(menu, view.audioMode.description, 'airpods-section-description');
+            if (view.audioMode.pendingHint) this.row(menu, view.audioMode.pendingHint, 'airpods-section-description');
+        }
 
         if (view.noiseControl) {
             this.row(menu, 'Noise control', 'airpods-section-title');
@@ -222,12 +225,8 @@ class CompanionMenu {
         }
 
         const mic = this.submenu(menu, `Dictation mic · ${view.dictation.summary}`, 'microphone-sensitivity-high-symbolic');
-        this.row(mic, 'Desired routing is independent of Ubuntu’s default input.');
-        this.row(mic, 'Effective launch: ' + (this.status?.voxtype?.effective?.mode === 'pinned' ? this.status.voxtype.effective.source : this.status?.voxtype?.effective ? 'Ubuntu default input' : 'Unknown'));
         for (const option of view.dictation.items)
             this.action(mic, option.label, option.argv[0] === 'voxtype' && option.argv[1] === 'pin' ? 'voxtype-pin' : 'voxtype-default', option.argv[2] ?? null, option.selected);
-        this.row(mic, 'Changes require an explicit idle restart; no automatic restart.');
-        this.row(mic, 'Actual capture not verified.');
 
         const settings = this.submenu(menu, 'More settings', 'emblem-system-symbolic');
         const apple = this.status?.apple ?? {};
@@ -256,7 +255,8 @@ class CompanionMenu {
             } else this.row(diagnostics, line, 'airpods-diagnostic-line');
         }
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        this.action(menu, view.footer.label, view.footer.action, null, false, '', view.footer.enabled,
+        this.action(menu, view.footer.label, view.footer.action, null, false,
+            view.footer.action === 'connect' ? 'airpods-connect' : '', view.footer.enabled,
             view.footer.action === 'disconnect' ? 'network-disconnect-symbolic' : 'network-connect-symbolic');
     }
 
