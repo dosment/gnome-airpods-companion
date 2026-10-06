@@ -120,13 +120,21 @@ class BackendTest(unittest.TestCase):
         self.assertTrue(self.setting);self.assertIsNone(self.saved)
         self.assertFalse(self.app.intent()["policy"]["enabled"])
 
+    def test_watch_default_never_enforces_even_with_saved_enabled_meeting_policy(self):
+        self.pw=graph();self.bz=bluez(True);self.setting=False;self.saved=False
+        self.app.save({"desired_mode":"meeting","device_address":MAC,"mode_revision":"r1","policy":{"enabled":True,"previous":{"value":True,"saved":None}}})
+        self.calls.clear()
+        self.app.watch(iterations=5, interval=0)
+        self.assertFalse(any(c[:2] in (["wpctl","set-profile"],["wpctl","set-default"]) for c in self.calls))
+        self.assertFalse(any(c[:2]==["wpctl","settings"] and len(c)>3 for c in self.calls))
+
     def test_watch_is_opt_in_and_stops_fighting_after_three_attempts(self):
         self.pw=graph();self.bz=bluez(True)
         self.app.mode("meeting");self.calls.clear()
         self.app.watch(iterations=5, interval=0)
         self.assertFalse(any(c[:2]==["wpctl","set-profile"] for c in self.calls))
         self.app.policy(True);self.calls.clear()
-        self.app.watch(iterations=11, interval=0)
+        self.app.watch(iterations=11, interval=0, enforce_profiles=True)
         self.assertEqual(sum(c[:2]==["wpctl","set-profile"] for c in self.calls),3)
         self.assertEqual(self.app.watch_error,"Profile enforcement budget exhausted; explicit mode selection or reconnect required")
 
@@ -196,7 +204,7 @@ class BackendTest(unittest.TestCase):
         self.pw=graph("headset-head-unit-lc3")+[sink()];self.bz=bluez(True)
         self.setting=False;self.saved=False
         self.app.save({"desired_mode":"meeting","device_address":MAC,"mode_revision":"r1","policy":{"enabled":True,"previous":{"value":True,"saved":None}}})
-        self.app.watch(iterations=1,interval=0)
+        self.app.watch(iterations=1,interval=0,enforce_profiles=True)
         self.assertEqual(self.calls.count(["wpctl","set-default","92"]),1)
 
     def test_watch_bounds_ambiguous_output_route_failure_per_generation(self):
@@ -220,7 +228,7 @@ class BackendTest(unittest.TestCase):
                 raise RuntimeError("reply lost after dispatch")
             return ""
         self.app.run=reply_lost_after_dispatch
-        result=self.app.watch(iterations=5,interval=0)
+        result=self.app.watch(iterations=5,interval=0,enforce_profiles=True)
         self.assertEqual(route_calls,2)
         self.assertEqual(result["error"],"reply lost after dispatch")
 
@@ -244,7 +252,7 @@ class BackendTest(unittest.TestCase):
             return ""
         self.app.run=replacing
         self.app.save({"desired_mode":"meeting","device_address":MAC,"mode_revision":"r1","policy":{"enabled":True,"previous":{"value":True,"saved":None}}})
-        self.app.watch(iterations=1,interval=0)
+        self.app.watch(iterations=1,interval=0,enforce_profiles=True)
         self.assertIn(["wpctl","set-default","193"],self.calls)
         self.assertNotIn(["wpctl","set-default","92"],self.calls)
 
@@ -274,7 +282,7 @@ class BackendTest(unittest.TestCase):
             return ""
         self.app.run=delayed_third
         self.app.save({"desired_mode":"meeting","device_address":MAC,"mode_revision":"r1","policy":{"enabled":True,"previous":{"value":True,"saved":None}}})
-        result=self.app.watch(iterations=4,interval=0)
+        result=self.app.watch(iterations=4,interval=0,enforce_profiles=True)
         self.assertEqual(writes,3)
         self.assertIn(["wpctl","set-default","193"],self.calls)
         self.assertIsNone(result["error"])
@@ -306,7 +314,7 @@ class BackendTest(unittest.TestCase):
             return ""
         self.app.run=raised_after_dispatch
         self.app.save({"desired_mode":"meeting","device_address":MAC,"mode_revision":"r1","policy":{"enabled":True,"previous":{"value":True,"saved":None}}})
-        result=self.app.watch(iterations=5,interval=0)
+        result=self.app.watch(iterations=5,interval=0,enforce_profiles=True)
         self.assertEqual(writes,3)
         self.assertIn(["wpctl","set-default","193"],self.calls)
         self.assertIsNone(result["error"])
@@ -322,7 +330,7 @@ class BackendTest(unittest.TestCase):
                 if reads>8: self.pw=graph()
             return old(args)
         self.app.run=drifting;self.calls.clear()
-        self.app.watch(iterations=12,interval=0)
+        self.app.watch(iterations=12,interval=0,enforce_profiles=True)
         self.assertEqual(sum(c[:2]==["wpctl","set-profile"] for c in self.calls),3)
 
     def test_watch_reports_exhausted_profile_drift_after_output_was_routed(self):
@@ -342,7 +350,7 @@ class BackendTest(unittest.TestCase):
             return ""
         self.app.run=drifting_after_route
         self.app.save({"desired_mode":"meeting","device_address":MAC,"mode_revision":"r1","policy":{"enabled":True,"previous":{"value":True,"saved":None}}})
-        result=self.app.watch(iterations=12,interval=0)
+        result=self.app.watch(iterations=12,interval=0,enforce_profiles=True)
         self.assertEqual(sum(c[:2]==["wpctl","set-profile"] for c in self.calls),3)
         self.assertEqual(result["error"],"Profile enforcement budget exhausted; explicit mode selection or reconnect required")
 
@@ -405,7 +413,7 @@ class BackendTest(unittest.TestCase):
                 self.calls.append(args);raise RuntimeError("failed set-profile")
             return old(args)
         self.app.run=failed
-        self.app.watch(iterations=9,interval=0)
+        self.app.watch(iterations=9,interval=0,enforce_profiles=True)
         self.assertEqual(sum(c[:2]==["wpctl","set-profile"] for c in self.calls),3)
 
     def test_policy_reenable_does_not_overwrite_human_changes(self):
@@ -476,7 +484,7 @@ class BackendTest(unittest.TestCase):
         self.pw=graph();self.bz=bluez(True)
         self.app.mode("meeting");self.app.policy(True);self.calls.clear()
         with self.app.exclusive():
-            self.app.watch(iterations=1,interval=0)
+            self.app.watch(iterations=1,interval=0,enforce_profiles=True)
         self.assertFalse(any(c[:2]==["wpctl","set-profile"] for c in self.calls))
 
     def test_unrelated_voxtype_intent_does_not_reset_profile_fighting_budget(self):
@@ -488,7 +496,7 @@ class BackendTest(unittest.TestCase):
                 intent=self.app.intent();intent["voxtype"]={"mode":"default","source":None};self.app.save(intent)
             return old(args)
         self.app.run=changing
-        self.app.watch(iterations=9,interval=0)
+        self.app.watch(iterations=9,interval=0,enforce_profiles=True)
         self.assertEqual(sum(c[:2]==["wpctl","set-profile"] for c in self.calls),3)
 
     def test_explicit_reselection_updates_only_mode_revision(self):

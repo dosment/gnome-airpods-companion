@@ -20,6 +20,7 @@ def main(argv=None):
     watch = sub.add_parser("watch")
     watch.add_argument("--iterations",type=int)
     watch.add_argument("--interval",type=float,default=2.0)
+    watch.add_argument("--enforce-profiles",action="store_true",help="opt in to legacy background profile and output enforcement")
     apple = sub.add_parser("apple")
     apple.add_argument("verb")
     select = sub.add_parser("select-device")
@@ -52,7 +53,7 @@ def dispatch(args, app, parser):
     elif args.command == "policy":
         result = app.policy(args.value == "enable")
     elif args.command == "watch":
-        result = app.watch(iterations=args.iterations, interval=args.interval)
+        result = app.watch(iterations=args.iterations, interval=args.interval, enforce_profiles=args.enforce_profiles)
     elif args.command == "apple":
         result = app.apple(args.verb)
     elif args.command == "select-device":

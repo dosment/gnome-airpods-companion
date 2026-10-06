@@ -53,7 +53,9 @@ class CLITest(unittest.TestCase):
         with patch("companion.cli.Backend") as factory,contextlib.redirect_stdout(io.StringIO()):
             factory.return_value.watch.return_value={}
             self.assertEqual(main(["watch","--iterations","1","--interval","0"]),0)
-            self.assertEqual(factory.return_value.watch.call_count,1)
+            factory.return_value.watch.assert_called_once_with(iterations=1, interval=0.0, enforce_profiles=False)
+            self.assertEqual(main(["watch","--iterations","1","--interval","0","--enforce-profiles"]),0)
+            self.assertEqual(factory.return_value.watch.call_args_list[-1].kwargs["enforce_profiles"],True)
 
     def test_cli_apple_dispatch(self):
         from companion.cli import main

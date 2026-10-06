@@ -7,7 +7,8 @@ A GNOME-native AirPods menu with explicit Music/Meeting audio modes, Apple liste
 ## Design
 
 - Keep GNOME, BlueZ, PipeWire, and WirePlumber; do not replace the desktop or Bluetooth stack.
-- Separate desired audio mode from observed profile. Reconnection should retain the user's choice and route playback to the current AirPods sink.
+- Separate saved audio intent from the observed profile. Native WirePlumber policy controls microphone-driven switching and reconnection by default; only explicit mode commands or opted-in legacy enforcement route playback to the AirPods sink.
+- Companion profile changes are manual by default: select `mode music` or `mode meeting` when wanted; native WirePlumber autoswitch remains independent. A watcher does not reassert saved intent unless explicitly started with `watch --enforce-profiles`.
 - Do not explicitly change Ubuntu's default microphone when switching Music/Meeting modes. Removing a microphone endpoint can still cause PipeWire to pick a fallback.
 - Voxtype may follow the system default or use an independently pinned input.
 - Reuse version-pinned LibrePods protocol work for battery and supported listening/ear-detection controls; never invent missing telemetry. The native popup presents unavailable or stale values plainly, keeps freshness detail in Diagnostics, and uses GNOME-native checked controls and submenu ordering.
@@ -31,6 +32,18 @@ python3 scripts/manage-install.py install
 ```
 
 It copies the backend, GNOME extension, and user-service unit into `~/.local`. It does **not** enable services, change audio modes, or edit Voxtype settings.
+
+### Recommended audio workflow
+
+Prefer WirePlumber's native microphone-driven profile switching, with the companion watcher stopped/disabled. Relinquish companion policy ownership, restore native autoswitch, and disable any previously enabled watcher:
+
+```sh
+systemctl --user disable --now gnome-airpods-companion.service
+gnome-airpods-companion policy disable
+wpctl settings --save bluetooth.autoswitch-to-headset-profile true
+```
+
+This lets AirPods microphone capture activate HFP and lets WirePlumber restore the previous profile (normally A2DP) when capture ends. Reconnect the AirPods if their microphone is not exposed after enabling autoswitch. Select that microphone in the meeting app; muting may leave capture open. The supplied service starts plain `watch`, which does not change profiles or default output. `policy enable` only disables WirePlumber autoswitch; it does not enable background enforcement. For a strictly manual alternative, leave the watcher disabled, run `gnome-airpods-companion policy enable` to disable native autoswitch, and use explicit `mode music` / `mode meeting`. Legacy background profile and output enforcement requires the explicit `gnome-airpods-companion watch --enforce-profiles` opt-in and policy ownership. Profile switching and default-output fallback are separate: when a profile removes a source, PipeWire may independently select another microphone. Without legacy enforcement, the companion routes playback only on explicit mode selection, not automatically on reconnect.
 
 Build and install the separately pinned Apple protocol daemon:
 

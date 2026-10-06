@@ -218,7 +218,7 @@ class Backend:
             self.save(intent)
         return {"policy":owned,"autoswitch":self.setting()}
 
-    def watch(self, iterations=None, interval=2.0):
+    def watch(self, iterations=None, interval=2.0, enforce_profiles=False):
         import time
         import math
         if not math.isfinite(interval) or interval < 0 or (iterations is None and interval < 0.5) or (iterations is not None and not 0 <= iterations <= 100000):
@@ -236,7 +236,7 @@ class Backend:
             try:
                 with self.exclusive():
                     intent = self.intent()
-                    if intent.get("policy",{}).get("enabled") and intent.get("desired_mode"):
+                    if enforce_profiles and intent.get("policy",{}).get("enabled") and intent.get("desired_mode"):
                         graph, device, card = self.discover()
                         token = (device["Address"], card["info"].get("props",{}).get("object.serial",card["id"]), intent.get("mode_revision",intent["desired_mode"])) if card and device and device.get("Connected") else None
                         if token != generation:

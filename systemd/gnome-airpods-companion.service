@@ -1,5 +1,5 @@
 [Unit]
-Description=GNOME AirPods Companion audio-mode policy
+Description=GNOME AirPods Companion (manual audio profile control)
 Documentation=https://github.com/dosment/gnome-airpods-companion
 After=graphical-session.target pipewire.service wireplumber.service
 PartOf=graphical-session.target
